@@ -27,7 +27,7 @@ Inspirado en: NetGPT (Meng et al., 2023), TrafficGPT (Qu et al., 2024).
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -130,6 +130,32 @@ class TrafficTransformer(GenerativeModel):
     @property
     def input_domain(self) -> InputDomain:
         return InputDomain.DISCRETE_SEQUENCE
+    
+    def _resolve_labels(
+        self,
+        n_samples: int,
+        labels: Optional[Union[int, Tensor, List[int], Tuple[int, ...]]],
+    ) -> Optional[Tensor]:
+        if self.cfg.num_classes == 0:
+            return None
+
+        if labels is None:
+            return torch.randint(0, self.cfg.num_classes, (n_samples,), device=self.device)
+
+        if isinstance(labels, int):
+            return torch.full((n_samples,), labels, dtype=torch.long, device=self.device)
+
+        if isinstance(labels, (list, tuple)):
+            y = torch.tensor(labels, dtype=torch.long, device=self.device)
+        elif torch.is_tensor(labels):
+            y = labels.to(self.device).long()
+        else:
+            raise TypeError(f"Unsupported labels type: {type(labels)}")
+
+        if y.shape[0] != n_samples:
+            raise ValueError(f"labels has {y.shape[0]} elements but n_samples={n_samples}")
+
+        return y
 
     # ------------------------------------------------------------------
     # build
@@ -204,8 +230,13 @@ class TrafficTransformer(GenerativeModel):
         self,
         input_ids:      Tensor,
         attention_mask: Optional[Tensor] = None,
+        labels: Optional[Tensor] = None,
     ) -> Tensor:
         """
+        Returns logits aligned with input_ids length.
+        If conditional, the conditioning prefix is prepended in embedding space,
+        but the returned logits exclude the prefix position.
+        
         Parameters
         ----------
         input_ids      : (B, L) — IDs de tokens
@@ -217,28 +248,44 @@ class TrafficTransformer(GenerativeModel):
         """
         B, L = input_ids.shape
 
-        # Máscara causal: el token t solo ve tokens < t
-        causal_mask = self._make_causal_mask(L, input_ids.device)
+        cond_emb = None
+        if self.cfg.num_classes > 0:
+            if labels is None:
+                labels = torch.randint(0, self.cfg.num_classes, (B,), device=input_ids.device)
+            else:
+                labels = labels.to(input_ids.device).long()
+                if labels.shape[0] != B:
+                    raise ValueError(f"labels batch size {labels.shape[0]} != input batch size {B}")
+            cond_emb = self.label_proj(self.label_emb(labels)).unsqueeze(1)  # (B,1,D)
 
-        # Máscara de padding (para ignorar PAD tokens)
-        key_padding_mask = None
+        x = self.token_emb(input_ids)  # (B,L,D)
+
+        if cond_emb is not None:
+            x = torch.cat([cond_emb, x], dim=1)  # (B,L+1,D)
+
+        x = self.pos_enc(x)
+
         if attention_mask is not None:
-            # nn.TransformerDecoder espera True donde IGNORAR
-            key_padding_mask = (attention_mask == 0)  # (B, L)
+            attention_mask = attention_mask.to(input_ids.device)
+            key_padding_mask = (attention_mask == 0)
+            if cond_emb is not None:
+                cond_mask = torch.ones((B, 1), dtype=torch.bool, device=input_ids.device)
+                key_padding_mask = torch.cat([cond_mask, key_padding_mask], dim=1)
+        else:
+            key_padding_mask = None
 
-        # Embeddings
-        x = self.token_emb(input_ids)     # (B, L, d_model)
-        x = self.pos_enc(x)               # (B, L, d_model)
+        causal_mask = self._make_causal_mask(x.size(1), input_ids.device)
 
-        # Decoder sin cross-attention: memory = x (decoder-only / GPT)
         out = self.transformer(
-            tgt                  = x,
-            memory               = x,
-            tgt_mask             = causal_mask,
-            tgt_key_padding_mask = key_padding_mask,
-        )  # (B, L, d_model)
+            tgt=x,
+            memory=x,
+            tgt_mask=causal_mask,
+            tgt_key_padding_mask=key_padding_mask,
+        )
 
-        logits = self.lm_head(out)  # (B, L, vocab_size)
+        logits = self.lm_head(out)  # (B, L+1, V) if conditional, else (B, L, V)
+        if self.cfg.num_classes > 0:
+            logits = logits[:, 1:, :]  # remove conditioning position
         return logits
 
     # ------------------------------------------------------------------
@@ -261,26 +308,26 @@ class TrafficTransformer(GenerativeModel):
         self._check_built()
 
         if isinstance(batch, (tuple, list)):
-            input_ids, attention_mask = batch[0].to(self.device), batch[1].to(self.device)
+            input_ids = batch[0].to(self.device)
+            labels = batch[1].to(self.device) if len(batch) > 1 else None
         else:
-            input_ids      = batch.to(self.device)
-            attention_mask = (input_ids != self.cfg.pad_token_id).long()
+            input_ids = batch.to(self.device)
+            labels = None
 
-        # Teacher forcing: input = tokens[:-1], target = tokens[1:]
-        inputs  = input_ids[:, :-1]
+        attention_mask = (input_ids != self.cfg.pad_token_id).long()
+
+        inputs = input_ids[:, :-1]
         targets = input_ids[:, 1:]
-        mask    = attention_mask[:, 1:]   # ignorar PAD en el loss
+        mask = attention_mask[:, 1:]
 
-        logits = self.forward(inputs)     # (B, L-1, V)
+        logits = self.forward(inputs, attention_mask=mask, labels=labels)
 
-        # Cross-entropy ignorando PAD
         loss = F.cross_entropy(
             logits.reshape(-1, self.cfg.vocab_size),
             targets.reshape(-1),
-            ignore_index = self.cfg.pad_token_id,
+            ignore_index=self.cfg.pad_token_id,
         )
 
-        # Perplexity como métrica adicional de logging
         with torch.no_grad():
             ppl = torch.exp(loss.detach())
 
@@ -300,6 +347,7 @@ class TrafficTransformer(GenerativeModel):
         temperature:    Optional[float] = None,
         top_k:          Optional[int]   = None,
         top_p:          Optional[float] = None,
+        labels: Optional[Union[int, Tensor, List[int], Tuple[int, ...]]] = None,
     ) -> Tensor:
         """
         Genera n_samples secuencias de forma autoregresiva.
@@ -320,6 +368,8 @@ class TrafficTransformer(GenerativeModel):
         """
         self._check_built()
         self.eval_mode()
+        
+        y_gen = self._resolve_labels(n_samples, labels)
 
         temp  = temperature if temperature is not None else self.cfg.temperature
         k     = top_k       if top_k       is not None else self.cfg.top_k
@@ -333,7 +383,7 @@ class TrafficTransformer(GenerativeModel):
         finished = torch.zeros(n_samples, dtype=torch.bool, device=self.device)
 
         for _ in range(max_new_tokens - 1):
-            logits = self.forward(generated)      # (B, cur_len, V)
+            logits = self.forward(generated, labels=y_gen)      # (B, cur_len, V)
             next_logits = logits[:, -1, :]        # (B, V) — último token
 
             # Temperatura

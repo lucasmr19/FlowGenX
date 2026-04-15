@@ -13,7 +13,6 @@ Todas las representaciones concretas heredan de TrafficRepresentation.
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -24,6 +23,8 @@ import torch
 from torch import Tensor
 
 from ..utils.logger_config import LOGGER
+
+from ..data_utils.preprocessing import PCAPPipeline
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +56,8 @@ class RepresentationConfig:
     Cada subclase puede extender esta dataclass añadiendo campos propios.
     Se recomienda serializar/deserializar con OmegaConf o YAML estándar.
     """
-    name: str = "base"
+    representation_type: str = "base" # nombre del tipo de representación (secuencial, visual, etc.)
+    name: str = "base_representation"  # clave del registry
 
     # Dimensiones de salida del encoder
     output_shape: Optional[Tuple[int, ...]] = None
@@ -180,10 +182,27 @@ class TrafficRepresentation(ABC):
         -------
         Estructura de tráfico reconstruida (tipo según la subclase).
         """
+    
+    @abstractmethod
+    def get_default_aggregator(self):
+        """
+        Tipo de agregador de tráfico utilizado para la representación.
+
+        Returns
+        -------
+        Clase del agregador (p.ej. FlowAggregator, PacketWindowAggregator, TrafficChunkAggregator).
+        """
 
     # ------------------------------------------------------------------
     # Métodos con implementación por defecto (sobreescribibles)
     # ------------------------------------------------------------------
+    
+    def project(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Proyecta x al espacio válido de la representación.
+        Por defecto: identidad.
+        """
+        return x
 
     def encode_batch(self, samples: List[Any]) -> Tensor:
         """
@@ -254,6 +273,12 @@ class TrafficRepresentation(ABC):
         Restaura el estado desde un dict. Las subclases deben extender.
         """
         pass
+    
+    def build_preprocessing_pipeline(self, **kwargs) -> PCAPPipeline:
+        return PCAPPipeline(
+            aggregator=self.get_default_aggregator(),
+            **kwargs,
+        )
 
     # ------------------------------------------------------------------
     # Utilidades internas
@@ -274,3 +299,7 @@ class TrafficRepresentation(ABC):
             f"invertible={self.invertibility.name}, "
             f"fitted={self._is_fitted})"
         )
+
+class TrafficEncoder(torch.nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError

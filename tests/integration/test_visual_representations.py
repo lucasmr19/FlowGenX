@@ -10,12 +10,23 @@ PCAP -> Flows -> Representation -> Tensor -> Image
 Además muestra ejemplos de representaciones.
 """
 
-import torch
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 
-from src.data_utils.loaders import build_datamodule_from_pcap
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+from src.data_utils.preprocessing import (
+    PCAPPipeline,
+    PacketWindowAggregator,
+    TrafficChunkAggregator
+)
+from src.representations.sequential.tokenizer import FlatTokenizer, SequentialConfig
+from src.representations.vision import (
+    GAFRepresentation, GAFConfig,
+    NprintRepresentation, NprintConfig,
+    NprintImageRepresentation, NprintImageConfig,
+)
 
 PCAP_PATH = Path("data/pcap/Benign/Gmail.pcap")
 
@@ -69,21 +80,6 @@ def compression_ratio(original_size: int, rep: np.ndarray) -> float:
 # Visualización comparativa (MUY útil para el TFG)
 # -----------------------------------------------------------
 def test_visualize_flow_representations_pipeline():
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import ListedColormap
-
-    from src.data_utils.preprocessing import (
-        PCAPPipeline,
-        PacketWindowAggregator,
-        TrafficChunkAggregator
-    )
-    from src.representations.sequential.tokenizer import FlatTokenizer, SequentialConfig
-    from src.representations.vision import (
-        GAFRepresentation, GAFConfig,
-        NprintRepresentation, NprintConfig,
-        NprintImageRepresentation, NprintImageConfig,
-    )
-
     # -----------------------------
     # 1. Datos
     # -----------------------------

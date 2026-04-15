@@ -15,7 +15,8 @@ Representaciones soportadas
 ----------------------------
 - "sequential"  Tokens enteros ≥ 0 y < vocab_size.
 - "gasf"        Valores flotantes en [-1.0, 1.0].
-- "nprint"      Campos binarios en {0, 1} (tolerancia configurable).
+- "nprint"      Campos ternarios en {-1, 0, 1} (tolerancia configurable).
+- "nprint_image" Valores continuos en [0.0, 1.0].
 
 El evaluador es intencionalmente estricto: detecta violaciones que
 indican que el modelo generativo no ha aprendido las restricciones
@@ -25,9 +26,7 @@ Nota sobre invertibilidad
 --------------------------
 La tasa de reconstrucción funcional (conversión sintético → .pcap válido)
 requiere acceso a la representación concreta y se delega a cada
-RepresentationBase mediante `decode_batch`. Este evaluador cubre la
-capa anterior: ¿los tensores generados cumplen las restricciones de
-la representación?
+RepresentationBase mediante `decode_batch`.
 """
 
 from __future__ import annotations
@@ -38,9 +37,6 @@ import numpy as np
 import torch
 
 from .base import BaseEvaluator, EvaluationReport, EvaluationResult
-
-RepresentationType = Literal["sequential", "gasf", "nprint"]
-
 
 # ---------------------------------------------------------------------------
 # Evaluador
@@ -69,7 +65,7 @@ class StructuralEvaluator(BaseEvaluator):
 
     def __init__(
         self,
-        representation_type: RepresentationType,
+        representation_type: Literal["flat_tokenizer", "protocol_aware",  "semantic_byte", "gasf", "nprint", "nprint_image"],
         vocab_size: Optional[int] = None,
         binary_threshold: float = 0.1,
         gasf_tolerance: float = 0.05,
@@ -80,9 +76,10 @@ class StructuralEvaluator(BaseEvaluator):
         self.binary_threshold = binary_threshold
         self.gasf_tolerance = gasf_tolerance
 
-        if representation_type == "sequential" and vocab_size is None:
+        if representation_type in ["flat_tokenizer", "protocol_aware", "semantic_byte"] and vocab_size is None:
             raise ValueError(
-                "vocab_size es obligatorio para representation_type='sequential'."
+                "vocab_size es obligatorio para representation_type="
+                "'flat_tokenizer', 'protocol_aware' o 'semantic_byte'."
             )
 
     # ------------------------------------------------------------------
@@ -110,16 +107,18 @@ class StructuralEvaluator(BaseEvaluator):
         synth_np = synthetic.detach().cpu().float().numpy()
         real_np = real.detach().cpu().float().numpy()
 
-        if self.representation_type == "sequential":
+        if self.representation_type in ["flat_tokenizer", "protocol_aware",  "semantic_byte"]:
             report.results.extend(self._evaluate_sequential(real_np, synth_np))
         elif self.representation_type == "gasf":
             report.results.extend(self._evaluate_gasf(real_np, synth_np))
         elif self.representation_type == "nprint":
             report.results.extend(self._evaluate_nprint(real_np, synth_np))
+        elif self.representation_type == "nprint_image":
+            report.results.extend(self._evaluate_nprint_image(real_np, synth_np))
         else:
             raise ValueError(
                 f"Tipo de representación desconocido: '{self.representation_type}'. "
-                "Usa 'sequential', 'gasf' o 'nprint'."
+                "Usa 'flat_tokenizer', 'protocol_aware', 'semantic_byte', 'gasf', 'nprint' o 'nprint_image'."
             )
 
         return report
@@ -238,46 +237,47 @@ class StructuralEvaluator(BaseEvaluator):
         synth: np.ndarray,
     ):
         """
-        nprint: campos deben ser binarios ∈ {0, 1}.
-
-        El formato nPrint codifica los bytes de la cabecera como bits,
-        por lo que cada campo debe ser 0 o 1. Los modelos de difusión
-        generan valores continuos que deben ser umbralados; esta métrica
-        cuantifica cuántos valores NO son binarios antes de umbralizar.
+        nprint: campos deben ser ternarios ∈ {-1, 0, 1}.
 
         Shape esperado: (N, n_packets, n_features) o (N, n_features).
+
+        Esta versión cuantifica:
+        - qué fracción de campos no está en {-1,0,1} antes de umbralizar
+        - tasa de muestras válidas
+        - confianza de binarización (tras umbralizar)
         """
         results = []
         t = self.binary_threshold
 
-        # Un valor es "binario" si está en [0, t] ∪ [1-t, 1]
-        is_binary = (
-            ((synth >= 0.0) & (synth <= t))
-            | ((synth >= (1.0 - t)) & (synth <= 1.0))
+        # Un valor es "válido" si está cerca de -1, 0 o 1
+        is_valid = (
+            ((synth >= -1.0) & (synth <= -1.0 + t))   # -1
+            | ((synth >= 0.0) & (synth <= t))         # 0
+            | ((synth >= 1.0 - t) & (synth <= 1.0))   # 1
         )
-        non_binary_rate_synth = float(np.mean(~is_binary))
+        non_ternary_rate_synth = float(np.mean(~is_valid))
 
-        is_binary_real = (
-            ((real >= 0.0) & (real <= t))
-            | ((real >= (1.0 - t)) & (real <= 1.0))
+        is_valid_real = (
+            ((real >= -1.0) & (real <= -1.0 + t))
+            | ((real >= 0.0) & (real <= t))
+            | ((real >= 1.0 - t) & (real <= 1.0))
         )
-        non_binary_rate_real = float(np.mean(~is_binary_real))
+        non_ternary_rate_real = float(np.mean(~is_valid_real))
 
         results.append(EvaluationResult(
-            metric_name="non_binary_field_rate",
-            value=non_binary_rate_synth,
+            metric_name="non_ternary_field_rate",
+            value=non_ternary_rate_synth,
             metadata={
                 "binary_threshold": t,
-                "real_baseline": non_binary_rate_real,
-                "description": "Fracción de campos que no están en {0,1} "
-                               "(antes de umbralizar). Real debería ser ≈ 0.0.",
+                "real_baseline": non_ternary_rate_real,
+                "description": "Fracción de campos que no están en {-1,0,1} "
+                            "(antes de umbralizar). Real debería ser ≈ 0.0.",
             },
         ))
 
-        # Tasa de paquetes completamente válidos (todos los campos binarios)
-        # Shape (N, n_packets, n_features) → valid si todos los campos del paquete son binarios
+        # Tasa de paquetes completamente válidos (todos los campos válidos)
         per_sample_valid = np.all(
-            is_binary,
+            is_valid,
             axis=tuple(range(1, synth.ndim)),
         )
         results.append(EvaluationResult(
@@ -286,8 +286,8 @@ class StructuralEvaluator(BaseEvaluator):
             metadata={"n_valid": int(np.sum(per_sample_valid)), "n_total": len(synth)},
         ))
 
-        # Tasa de paquetes reconstruibles tras umbralización (≥ 50% de campos binarios exactos)
-        binarized = (synth >= 0.5).astype(float)
+        # Tasa de paquetes reconstruibles tras umbralización (-1->0,1->1)
+        binarized = np.where(synth < 0.0, 0.0, 1.0)
         exact_match_rate_per_field = float(
             np.mean(np.abs(synth - binarized) < t)
         )
@@ -296,9 +296,75 @@ class StructuralEvaluator(BaseEvaluator):
             value=exact_match_rate_per_field,
             metadata={
                 "description": "Fracción de campos que caen cerca del umbral 0.5 "
-                               "tras binarización. Valores altos indican que el "
-                               "modelo ha aprendido bien la naturaleza binaria.",
+                            "tras binarización. Valores altos indican que el "
+                            "modelo ha aprendido bien la naturaleza binaria/ternaria.",
             },
         ))
 
+        return results
+    
+    def _evaluate_nprint_image(
+        self,
+        real: np.ndarray,
+        synth: np.ndarray,
+        tol: float = 1e-3,
+    ):
+        """
+        Evaluación para la representación nprint_image.
+ 
+        Inputs
+        ------
+        real  : np.ndarray  — Tensor(C, H, W) del flujo real
+        synth : np.ndarray  — Tensor(C, H, W) generado por el modelo
+        tol   : float       — tolerancia para comparaciones de valores continuos
+ 
+        Métricas cuantificadas:
+        - Valores fuera de [0, 1] (no válidos)
+        - Tasa de muestras válidas (todas las celdas dentro de [0,1])
+        - Exactitud de reconstrucción aproximada (±tol)
+        """
+        results = []
+ 
+        # --- 1. Valores fuera de rango ---------------------------------------
+        out_of_bounds_real = np.logical_or(real < 0.0, real > 1.0)
+        out_of_bounds_synth = np.logical_or(synth < 0.0, synth > 1.0)
+ 
+        results.append(EvaluationResult(
+            metric_name="out_of_range_rate",
+            value=float(np.mean(out_of_bounds_synth)),
+            metadata={
+                "real_baseline": float(np.mean(out_of_bounds_real)),
+                "description": "Fracción de valores que no están en [0,1].",
+            }
+        ))
+ 
+        # --- 2. Tasa de muestras válidas ------------------------------------
+        # Reducir sobre todas las dimensiones excepto la de batch (dim 0)
+        reduce_axes = tuple(range(1, synth.ndim))
+        per_sample_valid = np.all((synth >= 0.0) & (synth <= 1.0), axis=reduce_axes)
+        results.append(EvaluationResult(
+            metric_name="valid_sample_rate",
+            value=float(np.mean(per_sample_valid)),
+            metadata={
+                "n_valid": int(np.sum(per_sample_valid)),
+                "n_total": synth.shape[0],
+                "description": "Fracción de samples sin valores fuera de rango."
+            }
+        ))
+ 
+        # --- 3. Confianza de reconstrucción aproximada -----------------------
+        # Estimamos si la reconstrucción ch0/ch1 ± tol coincide con el real
+        diff = np.abs(synth - real)
+        close_match_rate = float(np.mean(diff <= tol))
+ 
+        results.append(EvaluationResult(
+            metric_name="reconstruction_confidence",
+            value=close_match_rate,
+            metadata={
+                "tolerance": tol,
+                "description": "Fracción de valores continuos que coinciden con la referencia "
+                            "dentro de la tolerancia especificada.",
+            }
+        ))
+ 
         return results

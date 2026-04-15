@@ -173,7 +173,7 @@ class TrafficDDPM(GenerativeModel):
 
     Soporta:
     - Entrenamiento estándar DDPM (L_simple MSE sobre ruido)
-    - Condicionamiento por clase/protocolo (NetDiffusion-style)
+    - Condicionamiento por clase/protocolo
     - Muestreo DDPM completo (T pasos)
     - Muestreo DDIM acelerado (n_steps << T, mucho más rápido)
 
@@ -254,7 +254,7 @@ class TrafficDDPM(GenerativeModel):
         """
         Un paso de entrenamiento DDPM.
 
-        L_simple = E_{t,x_0,ε}[‖ε − ε_θ(x_t, t, [labels])‖²]
+        L_simple = E_{t,x_0,ε}[‖ε - ε_θ(x_t, t, [labels])‖²]
 
         Parameters
         ----------

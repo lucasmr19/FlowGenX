@@ -1,0 +1,22 @@
+# configs/experiment/exp1.yaml
+
+representation:
+  representation_type: flat_tokenizer
+  name: bytes_v1
+  max_length: 512
+
+model:
+  model_type: transformer
+  name: transformer_v1
+
+  d_model: 256
+  n_layers: 6
+  n_heads: 8
+
+training:
+  batch_size: 32
+  epochs: 50
+  lr: 1e-4
+
+data:
+  dataset_path: data/cicids.pcap

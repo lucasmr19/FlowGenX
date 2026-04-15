@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ...data_utils.preprocessing import Flow, ParsedPacket
+from ...data_utils.preprocessing import PacketWindow, ParsedPacket
 from ..base import (
     Invertibility,
     RepresentationConfig,
@@ -48,7 +48,7 @@ _BYTES_FIELDS: Dict[str, int] = {
 @dataclass
 class NprintConfig(RepresentationConfig):
     """Parámetros para la representación nPrint completa."""
-
+    representation_type: str = "nprint"
     name: str = "nprint"
 
     # Número máximo de paquetes por flujo (filas de la imagen)
@@ -89,7 +89,7 @@ class NprintConfig(RepresentationConfig):
         # --- IPv6 (320 bits) ------------------------------------------------
         ("ipv6_ver",        4),   # Versión (siempre 6)
         ("ipv6_tc",         8),   # Traffic class
-        ("ipv6_fl",        20),   # Flow label
+        ("ipv6_fl",        20),   # PacketWindow label
         ("ipv6_len",       16),   # Payload length
         ("ipv6_nh",         8),   # Next header
         ("ipv6_hl",         8),   # Hop limit
@@ -266,12 +266,12 @@ class NprintRepresentation(TrafficRepresentation):
     # fit
     # -----------------------------------------------------------------------
 
-    def fit(self, samples: List[Flow]) -> "NprintRepresentation":
+    def fit(self, samples: List[PacketWindow]) -> "NprintRepresentation":
         """Calcula el percentil 99 del IAT para cuantización a 8 bits."""
         all_iats = [
             pkt.iat
-            for flow in samples
-            for pkt in flow.packets
+            for PacketWindow in samples
+            for pkt in PacketWindow.packets
             if pkt.iat is not None and pkt.iat > 0
         ]
         self._iat_max = float(np.percentile(all_iats, 99)) if all_iats else 1.0
@@ -286,9 +286,9 @@ class NprintRepresentation(TrafficRepresentation):
     # encode
     # -----------------------------------------------------------------------
 
-    def encode(self, sample: Flow) -> Tensor:
+    def encode(self, sample: PacketWindow) -> Tensor:
         """
-        Flow → Tensor(max_packets, total_bits) de float32 en {-1.0, 0.0, 1.0}.
+        PacketWindow → Tensor(max_packets, total_bits) de float32 en {-1.0, 0.0, 1.0}.
 
         Los paquetes se truncan a max_packets; las filas sobrantes se rellenan
         con pad_value.
@@ -307,23 +307,28 @@ class NprintRepresentation(TrafficRepresentation):
     # -----------------------------------------------------------------------
 
     def decode(self, tensor: Tensor) -> List[ParsedPacket]:
-        """
-        Tensor(max_packets, total_bits) → List[ParsedPacket].
-
-        Reconstruye todos los campos del esquema a partir de la imagen.
-        Las filas de solo padding se descartan.
-        """
         self._check_fitted()
-        image = tensor.numpy()
+        tensor = tensor.detach().cpu()
+        return self._decode_from_bit_matrix(tensor)
+
+
+    def _decode_from_bit_matrix(self, tensor: Tensor) -> List[ParsedPacket]:
+        tensor = tensor.detach().cpu()
+
+        image = tensor.detach().cpu().numpy()
         packets: List[ParsedPacket] = []
 
-        for row_idx in range(image.shape[0]):
-            row = image[row_idx]
-            if np.all(np.isclose(row, self.cfg.pad_value)): # fila de padding → fin del flujo
+        for row in image:
+            if np.all(np.isclose(row, self.cfg.pad_value)):
                 continue
             packets.append(self._row_to_pkt(row))
 
         return packets
+    
+    def get_default_aggregator(self):
+        from ...data_utils.preprocessing import PacketWindowAggregator
+        return PacketWindowAggregator
+
 
     # -----------------------------------------------------------------------
     # _pkt_to_row  (encode de un paquete individual)
@@ -430,7 +435,7 @@ class NprintRepresentation(TrafficRepresentation):
             except OSError:
                 return None
 
-        # IPv6 (tu parser no lo usa aún)
+        # IPv6
         elif field_name in ("ipv6_src", "ipv6_dst"):
             try:
                 raw = socket.inet_pton(socket.AF_INET6, raw)

@@ -17,6 +17,8 @@ from .tokenizer import (
     SPECIAL_TOKENS,
 )
 
+from .sequence_encoder import SequenceTrafficEncoder
+
 __all__ = [
     "TokenVocabulary",
     "FlatTokenizer",
@@ -34,4 +36,5 @@ __all__ = [
     "DIR_FWD",
     "DIR_BWD",
     "SPECIAL_TOKENS",
+    "SequenceTrafficEncoder",
 ]

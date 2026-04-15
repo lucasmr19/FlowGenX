@@ -13,6 +13,7 @@ from ..base import GenerativeModelConfig
 @dataclass
 class DiffusionConfig(GenerativeModelConfig):
     """Hiperparámetros del modelo de difusión."""
+    model_type: str = "ddpm"
     name: str = "traffic_ddpm"
 
     # Dimensiones de entrada
@@ -29,7 +30,7 @@ class DiffusionConfig(GenerativeModelConfig):
     dropout:           float         = 0.1
 
     # Condicionamiento por clase (0 = desactivado)
-    num_classes: int = 0
+    num_classes: int = 2
 
     # Scheduler de ruido
     timesteps:   int   = 1000

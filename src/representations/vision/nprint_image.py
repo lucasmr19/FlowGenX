@@ -75,7 +75,7 @@ Final tensor shape:
 4. Encoding Pipeline
 ---------------------------------------------------------------------
 
-Flow
+PacketWindow
   → NprintRepresentation.encode()
         → (N_packets, total_bits) ∈ {-1, 0, 1}
 
@@ -151,9 +151,9 @@ parameters into the preprocessor.  Disabled by default.
 
 Uniform Height Padding
 -----------------------
-When pad_to_height is set, flows with fewer packets are padded with
+When pad_to_height is set, PacketWindows with fewer packets are padded with
 pad_value (typically -1) to reach a fixed height.  This guarantees
-a constant (C, H, W) shape regardless of flow length, required by
+a constant (C, H, W) shape regardless of PacketWindow length, required by
 batch loaders that stack tensors without masking.
 
 ---------------------------------------------------------------------
@@ -170,7 +170,7 @@ batch loaders that stack tensors without masking.
 
 • Protocol channel (ch2):
     Static mode provides a positional prior but no dynamic signal.
-    Learnable mode requires gradient flow into the representation.
+    Learnable mode requires gradient PacketWindow into the representation.
 
 ---------------------------------------------------------------------
 8. Output Shape Example
@@ -211,7 +211,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from .nprint import NprintConfig, NprintRepresentation
-from ...data_utils.preprocessing import Flow, ParsedPacket
+from ...data_utils.preprocessing import PacketWindow, ParsedPacket
 from ..base import RepresentationType
 from ...utils.logger_config import LOGGER
 
@@ -319,7 +319,7 @@ class NprintImageConfig(NprintConfig):
     use_embedding_ch2 : bool
         If True, ch2 is computed via a learnable nn.Embedding(vocab, 1)
         initialised with the static normalised group values.
-        Requires gradient flow into the representation.
+        Requires gradient PacketWindow into the representation.
         Default: False (static normalised float).
 
     thr_presence : float
@@ -333,7 +333,7 @@ class NprintImageConfig(NprintConfig):
         pad_value.  Ensures constant (C, H, W) for batch loaders.
         Default: None (no padding beyond max_packets).
     """
-
+    representation_type:str = "nprint_image"
     name: str = "nprint_image"
 
     # Patchify
@@ -355,7 +355,7 @@ class NprintImageConfig(NprintConfig):
     use_ch3_variance: bool = True
 
     # Stochastic decode via Bernoulli sampling
-    use_bernoulli_decode: bool = True
+    use_bernoulli_decode: bool = False
 
     # Learnable embedding for ch2
     use_embedding_ch2: bool = False
@@ -377,15 +377,15 @@ class NprintImageRepresentation(NprintRepresentation):
     """
     Compressed nPrint → rectangular image representation.
 
-    Encode flow
+    Encode PacketWindow
     -----------
-    Flow
+    PacketWindow
       → NprintRepresentation.encode()     → Tensor(N_pkt, total_bits)
       → _apply_exclusion_mask()           → Tensor(N_pkt, W_masked)
       → _patchify()                       → Tensor(C, N_pkt, n_patches)
       → _pad_height()       [optional]    → Tensor(C, H, n_patches)
 
-    Decode flow (approximate / stochastic)
+    Decode PacketWindow (approximate / stochastic)
     ---------------------------------------
     Tensor(C, N_pkt, n_patches)
       → _unpatchify()      → Tensor(N_pkt, W_trimmed)   {-1, 0, 1}
@@ -455,9 +455,9 @@ class NprintImageRepresentation(NprintRepresentation):
     # encode
     # ------------------------------------------------------------------
 
-    def encode(self, sample: Flow) -> Tensor:
+    def encode(self, sample: PacketWindow) -> Tensor:
         """
-        Flow → Tensor(C, H, n_patches)  in [0, 1].
+        PacketWindow → Tensor(C, H, n_patches)  in [0, 1].
 
         C = 3 or 4 depending on use_ch3_variance.
         H = max_packets  or  pad_to_height if set.
@@ -513,21 +513,89 @@ class NprintImageRepresentation(NprintRepresentation):
             padding = torch.full(
                 (recovered.shape[0], pad),
                 self.img_cfg.pad_value,
-                dtype=torch.float32,
+                dtype=recovered.dtype,
+                device=recovered.device,
             )
             recovered = torch.cat([recovered, padding], dim=1)
 
         # 3. Scatter back to total_bits width
+        device = recovered.device
+
         full = torch.full(
             (N, self._total_bits),
             self.img_cfg.pad_value,
             dtype=torch.float32,
+            device=device,
         )
-        excl_t = torch.from_numpy(self._excl_mask)
+        excl_t = torch.from_numpy(self._excl_mask).to(device)
         full[:, excl_t] = recovered
 
         # 4. Delegate to parent decoder
-        return super().decode(full)
+        return self._decode_from_bit_matrix(full)
+    
+    def get_default_aggregator(self):
+        from ...data_utils.preprocessing import PacketWindowAggregator
+        return PacketWindowAggregator
+    
+    def _fast_project(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Proyección aproximada al manifold de nprintimage.
+        Recupera geométricamente la forma de imagen válida sin pasar por decode/encode,
+        por lo que no recupera semanticamente.
+        Espera forma (B, C, H, W).
+        """
+        if x.ndim == 3:
+            x = x.unsqueeze(0)
+
+        assert x.ndim == 4, f"Expected (B,C,H,W), got {x.shape}"
+
+        x = x.clone()
+
+        # Clamp global
+        x = torch.clamp(x, 0.0, 1.0)
+
+        # --- Canal 0: presencia ---
+        x[:, 0] = (x[:, 0] > 0.5).float()
+
+        # --- Canal 1: probabilidad ---
+        # (no tocar)
+
+        # --- Canal 2: protocolo ---
+        K = getattr(self.cfg, "num_protocol_bins", 8)
+        x[:, 2] = torch.round(x[:, 2] * (K - 1)) / (K - 1)
+
+        # --- Canal 3: varianza ---
+        if x.shape[1] > 3:
+            x[:, 3] = torch.clamp(x[:, 3], 0.0, 0.25)
+
+        return x
+    
+    def _encode_packets(self, packets: List[ParsedPacket]) -> Tensor:
+        flow = PacketWindow(
+            packets=packets)
+        return self.encode(flow)
+    
+    def project(self, x: torch.Tensor, exact: bool = False, **kwargs) -> torch.Tensor:
+        """
+        Proyecta muestras generadas al espacio válido de la representación.
+
+        Estrategia:
+            decode → encode  (proyección al manifold válido)
+        """
+        if x.ndim == 3:
+            x = x.unsqueeze(0)
+
+        if not exact:
+            return self._fast_project(x)
+
+        # proyección exacta
+        projected = []
+        for sample in x:
+            decoded = self.decode(sample)
+            reencoded = self.encode(decoded)
+            projected.append(reencoded)
+
+        return torch.stack(projected)
 
     # ------------------------------------------------------------------
     # _patchify

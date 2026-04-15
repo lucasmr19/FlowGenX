@@ -59,6 +59,7 @@ class EvaluationReport:
 
     evaluator_name: str
     results: List[EvaluationResult] = field(default_factory=list)
+    category: str = "general"
 
     def summary(self) -> Dict[str, float]:
         """Devuelve un dict plano {nombre_métrica: valor}."""
@@ -96,8 +97,9 @@ class BaseEvaluator(ABC):
         Nombre identificador del evaluador (usado en reports y logs).
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, category: str = "general") -> None:
         self.name = name
+        self.category = category
 
     @abstractmethod
     def evaluate(

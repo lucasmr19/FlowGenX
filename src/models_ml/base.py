@@ -14,12 +14,11 @@ training/trainer.py sea completamente agnóstico al modelo concreto.
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -56,7 +55,8 @@ class GenerativeModelConfig:
     Parámetros comunes a todos los modelos generativos.
     Cada subclase extiende esta dataclass.
     """
-    name: str = "base_model"
+    model_type: str = "base" # nombre del experimento
+    name: str = "base_model" # clave del registry
 
     # Dimensión de entrada (se valida contra la representación en runtime)
     input_shape: Optional[Tuple[int, ...]] = None
@@ -164,7 +164,7 @@ class GenerativeModel(ABC):
         -------
         Tensor de forma (n_samples, *input_shape).
         Para modelos autoregresivos, (n_samples, seq_len).
-        Para modelos visuales, (n_samples, C, H, W).
+        Para modelos visuales tipo NprintImage, (n_samples, C, H, W).
         """
 
     # ------------------------------------------------------------------

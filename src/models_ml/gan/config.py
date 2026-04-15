@@ -1,3 +1,5 @@
+# models_ml/gan/config.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,12 +14,17 @@ from ..base import GenerativeModelConfig
 @dataclass
 class GANConfig(GenerativeModelConfig):
     """Hiperparámetros de la GAN secuencial."""
+    model_type: str = "gan"
     name: str = "traffic_gan"
 
     # Vocabulario (debe coincidir con el tokenizador)
     vocab_size:   int = 10_000
     pad_token_id: int = 0
     seq_len:      int = 128       # longitud de secuencia fija
+    
+    # Condicionalidad (solo para GAN condicionales)
+    num_classes: int = 2
+    cond_dim: int = 32
 
     # Espacio latente
     latent_dim:   int = 128
@@ -26,6 +33,7 @@ class GANConfig(GenerativeModelConfig):
     gen_hidden:   int = 512
     gen_layers:   int = 2
     gen_dropout:  float = 0.1
+    gen_temperature: float = 1.0
 
     # Discriminador (Transformer encoder)
     disc_d_model: int = 256

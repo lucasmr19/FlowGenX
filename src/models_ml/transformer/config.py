@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import torch
 
 from ..base import GenerativeModelConfig
 
@@ -11,11 +12,16 @@ from ..base import GenerativeModelConfig
 @dataclass
 class TransformerConfig(GenerativeModelConfig):
     """Hiperparámetros del Transformer autoregresivo."""
+    model_type: str = "transformer"
     name: str = "traffic_transformer"
 
     # Vocabulario (debe coincidir con el del tokenizador usado)
     vocab_size:  int = 10_000
     pad_token_id: int = 0
+    
+    # Condicionalidad (solo para modelos condicionales)
+    num_classes: int = 0   # 0 = desactivado
+    cond_dim: int = 32
 
     # Arquitectura
     d_model:     int = 256     # dimensión del embedding

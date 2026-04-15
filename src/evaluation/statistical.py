@@ -10,7 +10,7 @@ Métricas implementadas
 3. Distancia entre matrices de correlación de Pearson.
 
 Todas las métricas operan feature a feature sobre tensores aplanados a (N, F),
-lo que las hace agnósticas a la representación (sequential, GASF, nprint).
+lo que las hace agnósticas a la representación (sequential, GAF, nprint).
 
 Interpretación
 --------------

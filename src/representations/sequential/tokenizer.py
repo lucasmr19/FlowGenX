@@ -162,6 +162,7 @@ class TokenVocabulary:
 @dataclass
 class SequentialConfig(RepresentationConfig):
     """Parámetros para representaciones secuenciales."""
+    representation_type: str = "flat_tokenizer"
     name: str = "sequential"
 
     # Vocabulario
@@ -299,6 +300,31 @@ class FlatTokenizer(TrafficRepresentation):
         self._check_fitted()
         ids = tensor.tolist()
         return self.vocab.decode_sequence(ids)
+    
+    def get_default_aggregator(self):
+        from ...data_utils.preprocessing import FlowAggregator
+        return FlowAggregator
+    
+    def project(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Proyecta la salida del modelo al espacio discreto de IDs del vocabulario.
+
+        Casos soportados:
+        - (B, L, V): logits -> argmax
+        - (B, L): valores continuos o IDs -> round/clamp
+        - (B, ...): cualquier otra forma compatible con una secuencia tokenizada
+        """
+        if x.dim() == 3:
+            # logits sobre vocabulario
+            x = torch.argmax(x, dim=-1)
+        elif x.dim() == 2:
+            # ya son valores por posición, pero pueden ser floats
+            if x.dtype.is_floating_point:
+                x = x.round()
+        else:
+            raise ValueError(f"Unsupported output shape for project(): {tuple(x.shape)}")
+
+        return x.long().clamp(0, self.vocab.vocab_size - 1)
 
     # --- Helpers ---
 
@@ -380,6 +406,7 @@ class ProtocolAwareConfig(SequentialConfig):
     """
     Extiende SequentialConfig con parámetros para tokenización jerárquica.
     """
+    representation_type: str = "protocol_aware"
     name: str = "protocol_aware"
 
     # Codificar estado TCP como token explícito
@@ -467,8 +494,8 @@ class ProtocolAwareTokenizer(FlatTokenizer):
                 tokens.append(state)
             else:
                 tokens.append(f"tcp_flags:{pkt.tcp_flags}")
-            if pkt.tcp_win > 0:
-                tokens.append(f"tcp_win:{self._win_bucket(pkt.tcp_win)}")
+            if pkt.tcp_window > 0:
+                tokens.append(f"tcp_window:{self._win_bucket(pkt.tcp_window)}")
 
         elif pkt.ip_proto == 17:  # UDP
             tokens.append(f"udp_len:{pkt.udp_len}")
@@ -580,6 +607,7 @@ class SemanticByteConfig(ProtocolAwareConfig):
     """
     Configuración para el tokenizador híbrido semántico + byte-level.
     """
+    representation_type: str = "semantic_byte"
     name: str = "semantic_byte"
 
     # Sección semántica

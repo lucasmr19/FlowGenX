@@ -106,7 +106,7 @@ class ParsedPacket:
     ipv6_dst: Optional[str] = None
 
     # -------------------------------------------------
-    # Transporte
+    # TCP
     # -------------------------------------------------
     tcp_sprt: int = -1
     tcp_dprt: int = -1
@@ -175,14 +175,30 @@ class ParsedPacket:
         if self.ipv6_src is not None:
             return 6
         return -1
+    
+    # --- Compatibility aliases for reconstruction / evaluation ---
 
     @property
     def ip_src(self) -> Optional[str]:
         return self.ipv4_src or self.ipv6_src
 
+    @ip_src.setter
+    def ip_src(self, value: Optional[str]) -> None:
+        self.ipv4_src = value
+        if value is not None:
+            self.ipv6_src = None
+
+
     @property
     def ip_dst(self) -> Optional[str]:
         return self.ipv4_dst or self.ipv6_dst
+
+    @ip_dst.setter
+    def ip_dst(self, value: Optional[str]) -> None:
+        self.ipv4_dst = value
+        if value is not None:
+            self.ipv6_dst = None
+
 
     @property
     def ip_proto(self) -> int:
@@ -192,6 +208,12 @@ class ParsedPacket:
             return self.ipv6_nh
         return -1
 
+    @ip_proto.setter
+    def ip_proto(self, value: int) -> None:
+        self.ipv4_proto = value
+        self.ipv6_nh = value
+
+
     @property
     def ip_len(self) -> int:
         if self.ipv4_tl != -1:
@@ -200,6 +222,12 @@ class ParsedPacket:
             return self.ipv6_len
         return 0
 
+    @ip_len.setter
+    def ip_len(self, value: int) -> None:
+        self.ipv4_tl = value
+        self.ipv6_len = value
+
+
     @property
     def ip_ttl(self) -> int:
         if self.ipv4_ttl != -1:
@@ -207,6 +235,40 @@ class ParsedPacket:
         if self.ipv6_hl != -1:
             return self.ipv6_hl
         return -1
+
+    @ip_ttl.setter
+    def ip_ttl(self, value: int) -> None:
+        self.ipv4_ttl = value
+        self.ipv6_hl = value
+
+
+    @property
+    def tcp_ack(self) -> int:
+        return self.tcp_ackn
+
+    @tcp_ack.setter
+    def tcp_ack(self, value: int) -> None:
+        self.tcp_ackn = value
+
+
+    @property
+    def tcp_window(self) -> int:
+        return self.tcp_wsize
+
+    @tcp_window.setter
+    def tcp_window(self, value: int) -> None:
+        self.tcp_wsize = value
+
+
+    @property
+    def payload(self) -> bytes:
+        return self.payload_bytes
+
+    @payload.setter
+    def payload(self, value: bytes) -> None:
+        self.payload_bytes = value or b""
+        self.payload_len = len(self.payload_bytes)
+
 
     @property
     def tcp_flags(self) -> int:
@@ -219,13 +281,24 @@ class ParsedPacket:
         flags |= (self.tcp_urg  << 5)
         return flags
 
-    @property
-    def tcp_win(self) -> int:
-        return self.tcp_wsize if self.tcp_wsize is not None else -1
+    @tcp_flags.setter
+    def tcp_flags(self, value: int) -> None:
+        self.tcp_fin  = (value >> 0) & 1
+        self.tcp_syn  = (value >> 1) & 1
+        self.tcp_rst  = (value >> 2) & 1
+        self.tcp_psh  = (value >> 3) & 1
+        self.tcp_ackf = (value >> 4) & 1
+        self.tcp_urg  = (value >> 5) & 1
 
+
+@dataclass(kw_only=True)
+class TrafficSample:
+    label: Optional[int] = None
+    class_name: Optional[str] = None   # "Benign", "Malware", "Skype", etc.
+    source: Optional[str] = None       # ruta del pcap origen
 
 @dataclass
-class Flow:
+class Flow(TrafficSample):
     """
     Agrupa el tráfico de red en flujos bidireccionales: colección ordenada
     de ParsedPacket identificados por la 5-tupla canónica.
@@ -263,7 +336,7 @@ class Flow:
 
 
 @dataclass
-class PacketWindow:
+class PacketWindow(TrafficSample):
     """
     Agrupa el tráfico de red en ventanas de paquetes consecutivos.
     """
@@ -276,7 +349,7 @@ class PacketWindow:
         return len(self.packets)
 
 @dataclass
-class TrafficChunk:
+class TrafficChunk(TrafficSample):
     """
     Temporal chunk of packets with optional overlap.
 
@@ -335,9 +408,6 @@ class TrafficChunk:
             "fwd_packets":   float(sum(1 for p in pkts if p.direction == 0)),
             "bwd_packets":   float(sum(1 for p in pkts if p.direction == 1)),
         }
-
-
-TrafficSample = Union[Flow, PacketWindow, TrafficChunk]
 
 
 # ---------------------------------------------------------------------------
@@ -1219,3 +1289,14 @@ class PCAPPipeline:
 
         LOGGER.info("Total muestras procesadas: %d", len(all_samples))
         return all_samples
+
+def build_pipeline_from_representation(
+    representation,
+    **pipeline_kwargs,
+) -> PCAPPipeline:
+    aggregator_cls = representation.get_default_aggregator()
+
+    return PCAPPipeline(
+        aggregator=aggregator_cls,
+        **pipeline_kwargs,
+    )

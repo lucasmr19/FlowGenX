@@ -23,11 +23,13 @@ import torch
 from torch import Tensor
 from skimage.transform import resize
 
+from src.data_utils.preprocessing import PacketWindow, ParsedPacket
 from ..base import TrafficRepresentation, RepresentationConfig, RepresentationType, Invertibility
 
 
 @dataclass
 class GAFConfig(RepresentationConfig):
+    representation_type: str = "gaf"
     name: str = "gaf"
     image_size: int = 128             # final square image
     method: str = "summation"         # "summation" (GASF) or "difference" (GADF)
@@ -40,7 +42,7 @@ class GAFConfig(RepresentationConfig):
 
 class GAFRepresentation(TrafficRepresentation):
     """
-    GAF representation that works directly over Flow/PacketWindow objects.
+    GAF representation that works directly over PacketWindow objects.
     """
 
     def __init__(self, config: Optional[GAFConfig] = None) -> None:
@@ -67,13 +69,13 @@ class GAFRepresentation(TrafficRepresentation):
         self._is_fitted = True
         return self
 
-    def encode(self, flow_or_window: Any) -> Tensor:
+    def encode(self, window: PacketWindow) -> Tensor:
       """
-      Convert a Flow or PacketWindow into a GAF image.
-      Works robustly for real PCAP flows, avoiding constant matrices.
+      Convert a PacketWindow into a GAF image.
+      Works robustly for real PCAP, avoiding constant matrices.
       """
       # 1. Extraer serie numérica desde los ParsedPacket
-      ts = np.array([getattr(pkt, self.cfg.field_name) for pkt in flow_or_window.packets], dtype=np.float32)
+      ts = np.array([getattr(pkt, self.cfg.field_name) for pkt in window.packets], dtype=np.float32)
 
       # 2. Binning opcional
       if self.cfg.use_binning and len(ts) > self.cfg.bin_size:
@@ -111,6 +113,21 @@ class GAFRepresentation(TrafficRepresentation):
 
     def decode(self, tensor: Tensor) -> Any:
         raise NotImplementedError("GAF is non-invertible.")
+    
+    def get_default_aggregator(self):
+        from ...data_utils.preprocessing import TrafficChunkAggregator
+        return TrafficChunkAggregator
+
+    def project(self, x, **kwargs):
+        if self.cfg.rescale_to_01:
+            x = x.clamp(0.0, 1.0)
+        else:
+            x = x.clamp(-1.0, 1.0)
+
+        # simetría sí es correcta
+        x = 0.5 * (x + x.transpose(-1, -2))
+
+        return x
 
     # -----------------------
     # Helpers

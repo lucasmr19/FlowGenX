@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Type, TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -25,10 +25,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from .preprocessing import PCAPPipeline, TrafficSample, TrafficAggregatorBase, FlowAggregator, PacketWindowAggregator
-from ..representations.base import TrafficRepresentation
 from ..utils.logger_config import LOGGER
 
-
+if TYPE_CHECKING:
+    from ..representations.base import TrafficRepresentation
+    
 # ---------------------------------------------------------------------------
 # Dataset base — trabaja sobre flujos ya parseados
 # ---------------------------------------------------------------------------
@@ -94,7 +95,7 @@ class RepresentationDataset(Dataset):
     def __init__(
         self,
         samples:          List[TrafficSample],
-        representation: TrafficRepresentation,
+        representation: "TrafficRepresentation",
         label_fn:       Optional[Callable[[TrafficSample], int]] = None,
         cache:          bool = False,
     ) -> None:
@@ -156,7 +157,7 @@ class TrafficDataModule:
     def __init__(
         self,
         samples:          List[TrafficSample],
-        representation: TrafficRepresentation,
+        representation: "TrafficRepresentation",
         train_ratio:    float = 0.70,
         val_ratio:      float = 0.15,
         test_ratio:     float = 0.15,
@@ -329,11 +330,6 @@ class TrafficDataModule:
             "seed":         self.seed,
         }
 
-
-# ---------------------------------------------------------------------------
-# Factory helper
-# ---------------------------------------------------------------------------
-
 def build_datamodule_from_pcap(
     pcap_path:      Union[str, Path],
     representation: TrafficRepresentation,
@@ -386,4 +382,137 @@ def build_datamodule_from_pcap(
         seed           = seed,
         label_fn       = label_fn,
     )
+    return dm
+
+
+# ---------------------------------------------------------------------------
+# Factory helper (MULTI-PCAP + clases por directorio)
+# ---------------------------------------------------------------------------
+
+def build_datamodule_from_dir(
+    root_path:      Union[str, Path],
+    representation: "TrafficRepresentation",
+    *,
+    aggregator: Union[Type[TrafficAggregatorBase], TrafficAggregatorBase] = FlowAggregator,
+    aggregator_kwargs: Optional[Dict[str, Any]] = None,
+    max_payload_bytes: int = 20,
+    streaming:        bool = True,
+    max_packets:      Optional[int] = None,
+    protocols:        Optional[List[str]] = None,
+    train_ratio:      float = 0.70,
+    val_ratio:        float = 0.15,
+    test_ratio:       float = 0.15,
+    batch_size:       int   = 32,
+    num_workers:      int   = 0,
+    seed:             int   = 42,
+    label_fn:         Optional[Callable[[TrafficSample], int]] = None,
+) -> TrafficDataModule:
+    """
+    Construye un TrafficDataModule a partir de un directorio de PCAPs.
+
+    Estructura esperada:
+        root_path/
+            class_1/
+                a.pcap
+                b.pcap
+            class_2/
+                c.pcap
+
+    Cada subdirectorio se interpreta como una clase.
+
+    Si root_path contiene directamente .pcap, se asigna clase única.
+
+    Añade automáticamente a cada sample:
+        - sample.label
+        - sample.class_name
+        - sample.source
+    """
+
+    root_path = Path(root_path)
+
+    pipeline = PCAPPipeline(
+        aggregator=aggregator,
+        max_packets=max_packets,
+        protocols=protocols,
+        max_payload_bytes=max_payload_bytes,
+        streaming=streaming,
+        **(aggregator_kwargs or {}),
+    )
+
+    all_samples: List[TrafficSample] = []
+    class_to_label: Dict[str, int] = {}
+
+    # ------------------------------------------------------------------
+    # Caso 1: directorio con subcarpetas (multi-clase)
+    # ------------------------------------------------------------------
+    subdirs = [d for d in root_path.iterdir() if d.is_dir()]
+
+    if subdirs:
+        LOGGER.info("Detectadas %d clases (subdirectorios).", len(subdirs))
+
+        for class_idx, class_dir in enumerate(sorted(subdirs)):
+            class_name = class_dir.name
+            class_to_label[class_name] = class_idx
+
+            pcap_files = list(class_dir.glob("*.pcap"))
+            LOGGER.info("Clase '%s': %d pcaps", class_name, len(pcap_files))
+
+            for pcap_file in pcap_files:
+                samples = pipeline.process(pcap_file)
+
+                for s in samples:
+                    # metadata (requiere que exista en TrafficSampleBase)
+                    setattr(s, "label", class_idx)
+                    setattr(s, "class_name", class_name)
+                    setattr(s, "source", str(pcap_file))
+
+                all_samples.extend(samples)
+
+    # ------------------------------------------------------------------
+    # Caso 2: directorio plano con .pcap
+    # ------------------------------------------------------------------
+    else:
+        pcap_files = list(root_path.glob("*.pcap"))
+
+        if not pcap_files:
+            raise ValueError(f"No se encontraron archivos .pcap en {root_path}")
+
+        LOGGER.info("Modo single-class (%d pcaps).", len(pcap_files))
+
+        for pcap_file in pcap_files:
+            samples = pipeline.process(pcap_file)
+
+            for s in samples:
+                setattr(s, "label", 0)
+                setattr(s, "class_name", "default")
+                setattr(s, "source", str(pcap_file))
+
+            all_samples.extend(samples)
+
+    if not all_samples:
+        raise RuntimeError("No se generaron muestras desde los PCAPs.")
+
+    LOGGER.info("Total samples generados: %d", len(all_samples))
+
+    # ------------------------------------------------------------------
+    # Label function por defecto
+    # ------------------------------------------------------------------
+    if label_fn is None:
+        label_fn = lambda s: getattr(s, "label", 0)
+
+    # ------------------------------------------------------------------
+    # Construcción del DataModule
+    # ------------------------------------------------------------------
+    dm = TrafficDataModule(
+        samples        = all_samples,
+        representation = representation,
+        train_ratio    = train_ratio,
+        val_ratio      = val_ratio,
+        test_ratio     = test_ratio,
+        batch_size     = batch_size,
+        num_workers    = num_workers,
+        seed           = seed,
+        label_fn       = label_fn,
+    )
+
     return dm

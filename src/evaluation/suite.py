@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import torch
-
+import pandas as pd
 from .base import BaseEvaluator, EvaluationReport, EvaluationResult
 
 
@@ -54,7 +54,7 @@ class SuiteResult:
     representation_name : str
         Nombre de la representación evaluada (para logging y tablas).
     model_name : str
-        Nombre del modelo generativo (para identificar la combinación R×M).
+        Nombre del modelo generativo (para identificar la combinación RxM).
     reports : list[EvaluationReport]
         Reportes individuales de cada evaluador.
     """
@@ -92,11 +92,6 @@ class SuiteResult:
         -------
         pd.DataFrame con columnas [representation, model, metric, value].
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("pandas es necesario para to_dataframe().")
-
         rows = []
         for metric_name, value in self.summary().items():
             evaluator, metric = metric_name.split(".", 1)
@@ -111,7 +106,7 @@ class SuiteResult:
 
     def __repr__(self) -> str:
         lines = [
-            f"SuiteResult [{self.representation_name} × {self.model_name}]",
+            f"SuiteResult [{self.representation_name} x {self.model_name}]",
             "=" * 60,
         ]
         for report in self.reports:

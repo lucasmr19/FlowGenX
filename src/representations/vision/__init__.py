@@ -1,6 +1,8 @@
 from .gaf import GAFConfig, GAFRepresentation
 from .nprint import NprintConfig, NprintRepresentation
 from .nprint_image import NprintImageConfig, NprintImageRepresentation
+from .vision_encoder import VisionTrafficEncoder
+
 
 __all__ = [
     "GAFConfig",
@@ -8,5 +10,6 @@ __all__ = [
     "NprintConfig",
     "NprintRepresentation",
     "NprintImageConfig",
-    "NprintImageRepresentation"
+    "NprintImageRepresentation",
+    "VisionTrafficEncoder"
 ]

@@ -20,9 +20,7 @@ Compatibilidad
   - NprintRepresentation  (H=max_packets, W=total_bits, C=1) ← INVERTIBLE
   - GASFRepresentation    (H=W=image_size, C=2)              ← NO invertible
 
-Inspirado en: NetDiffusion (Jiang et al., 2024),
-              NetDiffus (Sivaroopan et al., 2024),
-              DDPM (Ho et al., 2020), Improved DDPM (Nichol & Dhariwal, 2021).
+Inspirado en: DDPM (Ho et al., 2020), Improved DDPM (Nichol & Dhariwal, 2021).
 """
 
 from __future__ import annotations

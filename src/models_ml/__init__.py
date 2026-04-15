@@ -1,10 +1,9 @@
 """
-generative_models/__init__.py
+models_ml/__init__.py
 ==============================
 REGISTRY unificado de modelos generativos.
 
-Permite instanciar cualquier modelo por nombre desde configs YAML:
-  model = get_model("ddpm", config)
+Permite instanciar cualquier modelo por nombre desde configs YAML.
 """
 
 from .base import (
@@ -25,13 +24,13 @@ from .diffusion.unet import UNet2D
 from .gan.model import TrafficGAN
 from .gan.config import GANConfig
 
-REGISTRY = {
+REGISTRY_MODELS = {
     "transformer": TrafficTransformer,
     "ddpm":        TrafficDDPM,
     "gan":         TrafficGAN,
 }
 
-CONFIG_REGISTRY = {
+CONFIG_REGISTRY_MODELS = {
     "transformer": TransformerConfig,
     "ddpm":        DiffusionConfig,
     "gan":         GANConfig,
@@ -47,19 +46,19 @@ def get_model(name: str, config=None) -> GenerativeModel:
     name   : "transformer" | "ddpm" | "gan"
     config : instancia de la Config correspondiente (None = defaults)
     """
-    if name not in REGISTRY:
+    if name not in REGISTRY_MODELS:
         raise ValueError(
             f"Modelo desconocido: '{name}'. "
-            f"Disponibles: {list(REGISTRY.keys())}"
+            f"Disponibles: {list(REGISTRY_MODELS.keys())}"
         )
-    return REGISTRY[name](config)
+    return REGISTRY_MODELS[name](config)
 
 
-def get_config(name: str, **kwargs) -> GenerativeModelConfig:
+def get_model_config(name: str, **kwargs) -> GenerativeModelConfig:
     """Instancia la config de un modelo con overrides opcionales."""
-    if name not in CONFIG_REGISTRY:
-        raise ValueError(f"Config desconocida: '{name}'")
-    return CONFIG_REGISTRY[name](**kwargs)
+    if name not in CONFIG_REGISTRY_MODELS:
+        raise ValueError(f"Config de modelo desconocida: '{name}'")
+    return CONFIG_REGISTRY_MODELS[name](**kwargs)
 
 
 __all__ = [
@@ -67,6 +66,6 @@ __all__ = [
     "TrafficTransformer", "TransformerConfig",
     "TrafficDDPM", "DiffusionConfig", "UNet2D",
     "TrafficGAN", "GANConfig",
-    "REGISTRY", "CONFIG_REGISTRY",
-    "get_model", "get_config",
+    "REGISTRY_MODELS", "CONFIG_REGISTRY_MODELS",
+    "get_model", "get_model_config",
 ]
