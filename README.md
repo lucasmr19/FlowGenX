@@ -2,7 +2,9 @@
 
 **FlowGenX** is a modular and extensible framework for network traffic analysis, modeling, and generative research. Its primary focus is **generative modeling of network flows**, while also supporting representation learning, synthetic data creation, domain reconstruction, and evaluation across multiple tasks. The framework is designed for experimentation, reproducibility, and benchmarking, with pluggable components that can be combined across different data representations and model families.
 
-![FlowGenX](./media/pcap.png)
+<p align="center">
+  <img src="./media/pcap.png" alt="FlowGenX" width="300"/>
+</p>
 
 ---
 
@@ -85,8 +87,7 @@ data/
         ├── Miuref.pcap
         ├── Tinba.pcap
         └── Zeus.pcap
-
-
+│
 src/
 ├── configs/                # experiment configs (YAML)
 ├── core/                   # experiment & system orchestration
@@ -104,8 +105,7 @@ src/
 │   └── vision/
 ├── training/              # training loops / utilities
 └── utils/                 # shared helpers (logging, encoders, IO)
-
-
+│
 tests/
 ├── integration/
 └── unitary/

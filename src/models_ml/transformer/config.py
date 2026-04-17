@@ -32,6 +32,6 @@ class TransformerConfig(GenerativeModelConfig):
     dropout:     float = 0.1
 
     # Generación
-    temperature: float = 1.0
-    top_k:       int   = 50    # 0 = desactivado
-    top_p:       float = 0.9   # 1.0 = desactivado (nucleus sampling)
+    temperature: float = 1.2
+    top_k:       int   = 0    # 0 = desactivado
+    top_p:       float = 1.0   # 1.0 = desactivado (nucleus sampling)

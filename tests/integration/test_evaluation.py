@@ -165,7 +165,7 @@ def train_model_quick(
 # Parametrización
 # ---------------------------------------------------------------------------
 representations = ["semantic_byte", "flat_tokenizer", "protocol_aware", "gasf", "nprint_image"]
-#representations = ["nprint_image"]
+#representations = ["semantic_byte",]
 models = ["transformer", "gan", "ddpm"]
 
 
@@ -205,7 +205,7 @@ def test_full_integration_with_datamodule(rep_name, model_name):
     dm = build_datamodule_from_dir(
         DATA_DIR,
         representation=rep,
-        aggregator=rep.get_default_aggregator(),   # FIX: usa el agregador correcto
+        aggregator=rep.get_default_aggregator(),
         max_packets=100,
         batch_size=16,
         seed=42,
@@ -306,13 +306,19 @@ def test_full_integration_with_datamodule(rep_name, model_name):
         for f in flows_gen
     )
     assert total_packets > 0
+    #for f in flows_gen[:3]:
+    #    print(f"Ejemplo de flujo reconstruido: {f}")
     print(f"[Reconstruction] {len(flows_gen)} flows | {total_packets} packets")
+    #print("REAL TOKENS:", X[0][:20])
+    #print("GEN TOKENS:", samples_gen[0][:20])
 
     # -----------------------------------------------------------------------
     # 7. Evaluación estructural a nivel de tráfico
     # -----------------------------------------------------------------------
     traffic_evaluator = TrafficStructuralEvaluator()
     traffic_report = traffic_evaluator.evaluate(flows_real, flows_gen)
+    #flows_reconstructed = reconstructor.reconstruct(X, labels=y_real)
+    #traffic_evaluator.evaluate(flows_real, flows_reconstructed)
     traffic_summary = traffic_report.summary()
     print(f"[Traffic Structural] {traffic_summary}")
 

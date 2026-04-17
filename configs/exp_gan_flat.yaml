@@ -1,0 +1,111 @@
+# configs/exp_gan_flat.yaml
+# ============================================================
+# Experimento: FlatTokenizer + WGAN-GP (GAN secuencial)
+# Representación: secuencial (tokens discretos byte-level)
+# Modelo: LSTM Generator + Transformer Discriminator, WGAN-GP
+#
+# NOTA: flat_tokenizer+GAN es la combinación más proclive a
+# flujos degenerados por colapso de modo. Se recomienda:
+#   - n_critic >= 5  (discriminador fuerte antes de actualizar G)
+#   - lambda_gp >= 10
+#   - lr baja (5e-5) y Adam con betas=(0.0, 0.9)
+#   - EMA activado para suavizar la generación
+#   - Monitorizar val_loss_d como proxy de estabilidad
+# ============================================================
+
+experiment_name: gan_flat_v1
+
+# ---- Representación -------------------------------------------
+representation:
+  representation_type: flat_tokenizer
+  name: flat_tokenizer_v1
+  max_length: 128 # GAN trabaja mejor con secuencias más cortas
+  normalization: null
+
+# ---- Modelo ---------------------------------------------------
+model:
+  model_type: gan
+  name: gan_flat_v1
+
+  vocab_size: 10000
+  pad_token_id: 0
+  seq_len: 128
+
+  # Condicionalidad
+  num_classes: 2
+  cond_dim: 32
+
+  # Espacio latente
+  latent_dim: 128
+
+  # Generador LSTM
+  gen_hidden: 512
+  gen_layers: 2
+  gen_dropout: 0.1
+  gen_temperature: 1.0
+
+  # Discriminador Transformer
+  disc_d_model: 256
+  disc_n_heads: 8
+  disc_n_layers: 4
+  disc_d_ff: 512
+  disc_dropout: 0.1
+
+  # WGAN-GP
+  n_critic: 5
+  lambda_gp: 10.0
+  use_gradient_penalty: true
+
+# ---- Entrenamiento --------------------------------------------
+training:
+  epochs: 200 # GANs requieren más épocas para estabilizarse
+  batch_size: 64
+  lr: 5.0e-5 # lr más conservador para WGAN-GP
+  weight_decay: 0.0 # no usar weight_decay en WGAN-GP
+  grad_clip: null # WGAN-GP ya controla los gradientes con GP
+  seed: 42
+  num_workers: 0
+  amp: false
+
+  # Scheduler: cosine con warmup largo para estabilizar GAN
+  lr_scheduler: cosine
+  warmup_epochs: 10
+  lr_min: 1.0e-6
+
+  # Checkpointing
+  # Para GANs no hay una única val_loss limpia. Usamos val_loss_g
+  # (loss del generador en validación) como proxy de calidad.
+  checkpoint_dir: checkpoints/gan_flat_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  save_last: true
+  save_top_k: 3 # top-3 porque la GAN oscila más
+
+  # Early Stopping
+  # Patience alta porque las GANs tienen dinámica oscilatoria
+  early_stopping: true
+  early_stopping_patience: 40
+  early_stopping_delta: 1.0e-3
+
+  # Logging
+  log_every: 20
+  val_every: 2 # validar cada 2 épocas (más caro por n_critic)
+  use_tensorboard: false
+  use_wandb: false
+
+  # EMA — muy recomendado para GANs
+  use_ema: true
+  ema_decay: 0.999
+  ema_start: 20 # empezar después de que G se estabilice
+
+  # Splits
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+# ---- Datos ----------------------------------------------------
+data:
+  data_dir: data/pcap/
+  max_packets: null
+  protocols: null
+  max_payload_bytes: 20

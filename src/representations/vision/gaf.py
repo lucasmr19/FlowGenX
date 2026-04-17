@@ -111,7 +111,7 @@ class GAFRepresentation(TrafficRepresentation):
 
       return torch.tensor(gaf[np.newaxis, ...], dtype=torch.float32)
 
-    def decode(self, tensor: Tensor) -> Any:
+    def decode(self, tensor: Tensor) -> NotImplementedError:
         raise NotImplementedError("GAF is non-invertible.")
     
     def get_default_aggregator(self):

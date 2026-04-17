@@ -1,0 +1,92 @@
+# configs/exp_ddpm_nprint.yaml
+# ============================================================
+# Experimento: NprintImage + DDPM
+# Representación: visual (PacketWindow → imagen H×W)
+# Modelo: DDPM con UNet2D + condicionamiento por clase
+#
+# NprintImage usa PacketWindowAggregator → ventanas de paquetes
+# → imagen con campos nPrint por fila. Alto número de paquetes/flujo.
+# ============================================================
+
+experiment_name: ddpm_nprint_v1
+
+representation:
+  representation_type: nprint_image
+  name: nprint_image_v1
+  normalization: minmax      # normalizar a [-1,1] para DDPM
+
+model:
+  model_type: ddpm
+  name: ddpm_nprint_v1
+
+  # Dimensiones de imagen nPrint (ajustar según config de NprintImageConfig)
+  in_channels:  1
+  image_height: 20           # ventana de 20 paquetes
+  image_width:  193          # campos nPrint por paquete
+
+  # UNet
+  base_ch:           64
+  channel_mults:     [1, 2, 4]
+  n_res_per_level:   2
+  attention_levels:  [1, 2]
+  n_heads:           4
+  dropout:           0.1
+
+  # Condicionamiento
+  num_classes: 2
+
+  # Scheduler de ruido
+  timesteps:     1000
+  beta_start:    1.0e-4
+  beta_end:      0.02
+  beta_schedule: cosine      # cosine > linear para tráfico
+
+  # Muestreo DDIM acelerado
+  ddim_steps:    50
+  ddim_eta:      0.0         # determinístico
+
+  clip_denoised: true
+
+training:
+  epochs:       200
+  batch_size:   16           # imágenes → batch más pequeño
+  lr:           2.0e-4
+  weight_decay: 0.0          # DDPM no usa weight_decay estándar
+  grad_clip:    1.0
+  seed:         42
+  num_workers:  0
+  amp:          true         # AMP beneficioso con UNet
+
+  lr_scheduler:  cosine
+  warmup_epochs: 10
+  lr_min:        1.0e-6
+
+  checkpoint_dir:    checkpoints/ddpm_nprint_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode:   min
+  save_last:         true
+  save_top_k:        2
+
+  early_stopping:          true
+  early_stopping_patience: 30
+  early_stopping_delta:    1.0e-5
+
+  log_every:       20
+  val_every:       1
+  use_tensorboard: false
+  use_wandb:       false
+
+  # EMA muy recomendado para DDPM (Song et al., 2020; Karras et al., 2022)
+  use_ema:    true
+  ema_decay:  0.9999
+  ema_start:  5
+
+  train_ratio: 0.70
+  val_ratio:   0.15
+  test_ratio:  0.15
+
+data:
+  data_dir:          data/pcap/
+  max_packets:       null
+  protocols:         null
+  max_payload_bytes: 20

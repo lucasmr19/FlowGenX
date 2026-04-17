@@ -212,7 +212,6 @@ from torch import Tensor
 
 from .nprint import NprintConfig, NprintRepresentation
 from ...data_utils.preprocessing import PacketWindow, ParsedPacket
-from ..base import RepresentationType
 from ...utils.logger_config import LOGGER
 
 

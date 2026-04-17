@@ -1,0 +1,85 @@
+# configs/exp_gan_protocol.yaml
+# ============================================================
+# Experimento: ProtocolAwareTokenizer + GAN
+# Representación: secuencial con separadores de capa de protocolo
+# Modelo: WGAN-GP con LSTM Generator + Transformer Discriminator
+# ============================================================
+
+experiment_name: gan_protocol_v1
+
+representation:
+  representation_type: protocol_aware
+  name: protocol_aware_v1
+  max_length: 128
+  normalization: null
+
+model:
+  model_type: gan
+  name: gan_protocol_v1
+
+  vocab_size: 12000 # vocabulario algo mayor por los separadores de capa
+  pad_token_id: 0
+  seq_len: 128
+
+  num_classes: 2
+  cond_dim: 32
+
+  latent_dim: 128
+
+  gen_hidden: 512
+  gen_layers: 2
+  gen_dropout: 0.1
+  gen_temperature: 1.0
+
+  disc_d_model: 256
+  disc_n_heads: 8
+  disc_n_layers: 4
+  disc_d_ff: 512
+  disc_dropout: 0.1
+
+  n_critic: 5
+  lambda_gp: 10.0
+  use_gradient_penalty: true
+
+training:
+  epochs: 200
+  batch_size: 64
+  lr: 5.0e-5
+  weight_decay: 0.0
+  grad_clip: null
+  seed: 42
+  num_workers: 0
+  amp: false
+
+  lr_scheduler: cosine
+  warmup_epochs: 10
+  lr_min: 1.0e-6
+
+  checkpoint_dir: checkpoints/gan_protocol_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  save_last: true
+  save_top_k: 3
+
+  early_stopping: true
+  early_stopping_patience: 40
+  early_stopping_delta: 1.0e-3
+
+  log_every: 20
+  val_every: 2
+  use_tensorboard: false
+  use_wandb: false
+
+  use_ema: true
+  ema_decay: 0.999
+  ema_start: 20
+
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+data:
+  data_dir: data/pcap/
+  max_packets: null
+  protocols: null
+  max_payload_bytes: 20

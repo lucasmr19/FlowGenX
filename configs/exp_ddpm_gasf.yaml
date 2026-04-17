@@ -1,0 +1,94 @@
+# configs/exp_ddpm_gasf.yaml
+# ============================================================
+# Experimento: GAF + DDPM
+# Representación: visual (Gramian Angular Field)
+# Modelo: DDPM con UNet2D (sin condicionamiento, NON_INVERTIBLE)
+#
+# GASF usa TrafficChunkAggregator (chunks de paquetes). Solo la
+# diagonal de la imagen es invertible → el número de paquetes
+# recuperados por flujo es necesariamente menor que en NprintImage.
+# Esto es esperado y no es un bug.
+#
+# Por la naturaleza NON_INVERTIBLE de GASF, la reconstrucción de
+# tráfico pasa por la diagonal: el evaluador usa solo esa parte,
+# por lo que las métricas de reconstrucción son aproximadas.
+# ============================================================
+
+experiment_name: ddpm_gasf_v1
+
+representation:
+  representation_type: gaf
+  name: gaf_v1
+  normalization: minmax # normalizar a [-1,1] para DDPM
+  method: summation # "summation" (GASF) or "difference" (GADF)
+
+model:
+  model_type: ddpm
+  name: ddpm_gasf_v1
+
+  in_channels: 1 # 1 canal (GASF escalar)
+  image_height: 64 # tamaño del chunk / ventana temporal
+  image_width: 64
+
+  base_ch: 32 # GASF más simple → UNet más ligero
+  channel_mults: [1, 2, 4]
+  n_res_per_level: 2
+  attention_levels: [1, 2]
+  n_heads: 4
+  dropout: 0.1
+
+  # condicionamiento
+  num_classes: 2
+
+  timesteps: 1000
+  beta_start: 1.0e-4
+  beta_end: 0.02
+  beta_schedule: cosine
+
+  ddim_steps: 50
+  ddim_eta: 0.0
+
+  clip_denoised: true
+
+training:
+  epochs: 200
+  batch_size: 16
+  lr: 2.0e-4
+  weight_decay: 0.0
+  grad_clip: 1.0
+  seed: 42
+  num_workers: 0
+  amp: true
+
+  lr_scheduler: cosine
+  warmup_epochs: 10
+  lr_min: 1.0e-6
+
+  checkpoint_dir: checkpoints/ddpm_gasf_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  save_last: true
+  save_top_k: 2
+
+  early_stopping: true
+  early_stopping_patience: 30
+  early_stopping_delta: 1.0e-5
+
+  log_every: 20
+  val_every: 1
+  use_tensorboard: false
+  use_wandb: false
+
+  use_ema: true
+  ema_decay: 0.9999
+  ema_start: 5
+
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+data:
+  data_dir: data/pcap/
+  max_packets: null
+  protocols: null
+  max_payload_bytes: 20

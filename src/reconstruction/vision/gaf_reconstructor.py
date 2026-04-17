@@ -1,22 +1,21 @@
 """
-src/reconstruction/vision.py
-=============================
-Reconstructores para representaciones visuales.
+src/reconstruction/vision/gaf_reconstructor.py
+===============================================
 
-Clases
-------
-GAFReconstructor
-    Imagen GASF → serie temporal (vía diagonal) → bytes → paquetes sintéticos.
-    La inversión es aproximada (no biyectiva). Se usa solo la diagonal principal.
+Reconstrucción desde GAFRepresentation (GASF / GADF).
 
-NprintImageReconstructor
-    Imagen RGB tipo NetDiffusion → decolorización → matriz nprint →
-    campos de red → paquetes.
-    Totalmente heurístico. Requiere thresholds y mapeos color → valor.
+Perfil: LOSSY | agresividad=0.90 | needs_flow_state=True | needs_payload_synthesis=True
+────────────────────────────────────────────────────────────────────────────────────────
+La inversión GAF NO es biyectiva. Solo se usa la diagonal de la imagen
+(GASF(i,i) = cos²(φ_i)) para recuperar una serie temporal aproximada,
+que se cuantiza a bytes y se segmenta en paquetes.
 
-Ambas clases mantienen el contrato de BaseReconstructor:
-    decode()               → List[List[ParsedPacket]]
-    heuristics(…, *, meta) → List[ParsedPacket]
+Toda la semántica de red es heurística:
+  - decode()      → diagonal GASF → serie → bytes → paquetes crudos.
+  - heuristics()  → asigna IPs, puertos, proto, flags (la heurística ES el método).
+  - _repair_intra → síntesis completa (is_lossy).
+  - _synthesize   → genera payloads donde faltan.
+  - _repair_inter → FlowState: TCP FSM bidireccional con handshake completo.
 """
 
 from __future__ import annotations
@@ -25,7 +24,12 @@ from typing import List, Optional
 
 import torch
 
-from src.reconstruction.base import ChunkReconstructor, ReconstructionMeta
+from src.reconstruction.base import (
+    ChunkReconstructor,
+    InvertibilityLevel,
+    ReconstructionMeta,
+    ReconstructionProfile,
+)
 from src.data_utils.preprocessing import ParsedPacket
 from src.reconstruction.heuristics import (
     assign_synthetic_ips,
@@ -38,9 +42,6 @@ from src.reconstruction.heuristics import (
     segment_bytes_into_packets,
 )
 
-# ---------------------------------------------------------------------------
-# GAFReconstructor
-# ---------------------------------------------------------------------------
 
 class GAFReconstructor(ChunkReconstructor):
     """
@@ -51,13 +52,22 @@ class GAFReconstructor(ChunkReconstructor):
         → diagonal GASF → serie temporal ∈ [-1, 1]   [inversión aproximada]
         → cuantización → bytes
         → segmentación en paquetes
-        → heurísticas de cabecera
+        → heurísticas completas (IPs, puertos, flags)
+        → FlowState TCP FSM
 
-    Nota:
-        La inversión GAF NO es exacta. El resto de la imagen (correlaciones
-        cruzadas) se descarta por ser matemáticamente no invertible.
-        Genera tráfico estadísticamente plausible, no fiel al original.
+    La inversión no es exacta. El tráfico generado es estadísticamente
+    plausible pero no fiel al original.
     """
+
+    # ── Perfil de reconstrucción ──────────────────────────────────────────
+    @property
+    def profile(self) -> ReconstructionProfile:
+        return ReconstructionProfile(
+            invertibility=InvertibilityLevel.LOSSY,
+            needs_flow_state=True,        # FSM TCP bidireccional
+            needs_payload_synthesis=True, # sintetizar payloads donde falten
+            repair_aggressiveness=0.90,   # is_lossy: heurística es el método
+        )
 
     def __init__(
         self,
@@ -79,39 +89,33 @@ class GAFReconstructor(ChunkReconstructor):
 
     def decode(self, samples: torch.Tensor) -> List[List[ParsedPacket]]:
         """
-        samples : (B, C, H, W) o (B, H, W) — batch de imágenes GASF en [-1, 1].
+        samples : (B, C, H, W) o (B, H, W) — imágenes GASF en [-1, 1].
 
-        Pipeline por muestra:
+        Por muestra:
           1. Extraer diagonal → serie temporal
           2. Cuantizar → bytes
-          3. Segmentar bytes → lista de ParsedPacket en bruto
+          3. Segmentar → ParsedPackets crudos (sin cabeceras)
         """
         if samples.dim() == 3:
             samples = samples.unsqueeze(1)
 
-        B = samples.shape[0]
         result = []
-
-        for b in range(B):
-            img = samples[b]  # (C, H, W)
-
-            series = self.inverse_gasf_diagonal(img)   # (N,) ∈ [-1, 1]
-            raw_bytes = quantize_series_to_bytes(series, n_bins=self.n_bins)
-
+        for b in range(samples.shape[0]):
+            img    = samples[b]
+            series = self.inverse_gasf_diagonal(img)
+            raw    = quantize_series_to_bytes(series, n_bins=self.n_bins)
             chunks = segment_bytes_into_packets(
-                raw_bytes,
+                raw,
                 max_payload=self.max_payload_bytes,
                 min_payload=self.min_payload_bytes,
                 seed=self.seed,
             )
-
-            pkts = [ParsedPacket(payload_bytes=chunk) for chunk in chunks]
-            result.append(pkts)
+            result.append([ParsedPacket(payload_bytes=c) for c in chunks])
 
         return result
 
     # ------------------------------------------------------------------
-    # heuristics
+    # heuristics  (la heurística ES el método para LOSSY)
     # ------------------------------------------------------------------
 
     def heuristics(
@@ -121,68 +125,67 @@ class GAFReconstructor(ChunkReconstructor):
         meta: ReconstructionMeta,
     ) -> List[ParsedPacket]:
         """
-        Tras la inversión GAF, los bytes no tienen semántica de cabecera.
-        Aplicamos las mismas heurísticas que FlatTokenizer:
-          - IPs y puertos sintéticos
-          - Flags TCP por posición
-          - Timestamps uniformes
+        Asigna cabeceras completas a los paquetes GASF.
+
+        Para representaciones LOSSY la heurística no es un parche:
+        ES la forma de producir tráfico funcional a partir de datos
+        que no tienen semántica de red.
+
+        Nota: el FlowState posterior (_repair_inter_with_flow_state)
+        sobreescribirá las flags TCP para garantizar el handshake correcto.
+        Aquí solo establecemos los valores de campo que la FSM no toca
+        (IPs, puertos, TTL, ip_len).
         """
         if not packets:
             return packets
 
         src_ip, dst_ip = assign_synthetic_ips(seed=self.seed)
-        sport, dport = assign_synthetic_ports(proto=6, seed=self.seed)
-        proto = infer_protocol_from_port(dport)
-        n = len(packets)
-        timestamps = generate_timestamps(n, base_time=self.base_timestamp, seed=self.seed)
+        sport, dport   = assign_synthetic_ports(proto=6, seed=self.seed)
+        proto          = infer_protocol_from_port(dport)
+        n              = len(packets)
+        timestamps     = generate_timestamps(n, base_time=self.base_timestamp, seed=self.seed)
 
         for i, pkt in enumerate(packets):
-            pkt.ip_src = src_ip
-            pkt.ip_dst = dst_ip
-            pkt.sport = sport
-            pkt.dport = dport
-            pkt.ip_proto = proto
-            pkt.ip_ttl = 64
+            pkt.ip_src    = src_ip
+            pkt.ip_dst    = dst_ip
+            pkt.sport     = sport
+            pkt.dport     = dport
+            pkt.ip_proto  = proto
+            pkt.ip_ttl    = 64
             pkt.timestamp = timestamps[i]
-            pkt.ip_len = estimate_packet_length(pkt.payload, proto)
+            pkt.ip_len    = estimate_packet_length(pkt.payload or b"", proto)
 
             if proto == 6:
-                pkt.tcp_flags = infer_tcp_flags(i, n, has_data=len(pkt.payload) > 0)
+                # Flags preliminares; FlowState las sobreescribirá con la FSM
+                pkt.tcp_flags  = infer_tcp_flags(i, n, has_data=bool(pkt.payload))
                 pkt.tcp_window = 65535
             elif proto == 17:
-                pkt.udp_len = 8 + len(pkt.payload)
+                pkt.udp_len = 8 + len(pkt.payload or b"")
 
         return packets
 
     # ------------------------------------------------------------------
-    # Inversión GAF (método estático)
+    # Inversión GASF (diagonal)
     # ------------------------------------------------------------------
 
     @staticmethod
     def inverse_gasf_diagonal(image: torch.Tensor) -> torch.Tensor:
         """
-        Inversión aproximada de GASF usando solo la diagonal.
+        Inversión aproximada de GASF usando la diagonal principal.
 
             GASF(i,i) = cos(2·φ_i)  →  φ_i = arccos(GASF(i,i)) / 2
-
-        La serie temporal normalizada se recupera como:
             x̂_i = cos(φ_i)
 
         Parameters
         ----------
-        image : torch.Tensor de shape (H, W) o (C, H, W), valores en [-1, 1].
+        image : (H, W) o (C, H, W) en [-1, 1].
 
         Returns
         -------
-        torch.Tensor de shape (N,) con la serie temporal en [-1, 1].
+        Serie temporal (N,) en [-1, 1].
         """
-        if image.dim() == 3:
-            img = image[0]   # primer canal
-        else:
-            img = image
-
-        diag = torch.clamp(img.diagonal(), -1.0, 1.0)  # GASF(i,i)
-        phi = torch.acos(diag) / 2.0                   # φ_i
-        series = torch.cos(phi)                         # x̂_i ∈ [0, 1]
-        series = 2.0 * series - 1.0                     # → [-1, 1]
-        return series
+        img  = image[0] if image.dim() == 3 else image
+        diag = torch.clamp(img.diagonal(), -1.0, 1.0)
+        phi  = torch.acos(diag) / 2.0
+        x    = torch.cos(phi)
+        return 2.0 * x - 1.0   # → [-1, 1]

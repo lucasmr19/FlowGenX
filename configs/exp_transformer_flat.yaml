@@ -1,0 +1,94 @@
+# configs/exp_transformer_flat.yaml
+# ============================================================
+# Experimento: FlatTokenizer + Transformer autoregresivo
+# Representación: secuencial (tokens discretos byte-level)
+# Modelo: GPT-style decoder-only Transformer
+#
+# Referencia: NetGPT (Meng et al., 2023)
+#             TrafficGPT (Qu et al., 2024)
+# ============================================================
+
+experiment_name: transformer_flat_v1
+
+# ---- Representación -------------------------------------------
+representation:
+  representation_type: flat_tokenizer
+  name: flat_tokenizer_v1
+  max_length: 512
+  normalization: null # tokenización discreta, no normalizar
+
+# ---- Modelo ---------------------------------------------------
+model:
+  model_type: transformer
+  name: transformer_flat_v1
+
+  # vocab_size se sincroniza automáticamente desde la representación
+  # si no se especifica aquí. Se puede fijar explícitamente:
+  vocab_size: 10000
+  pad_token_id: 0
+
+  # Condicionalidad: 2 clases (Benign=0, Malware=1)
+  num_classes: 2
+  cond_dim: 32
+
+  # Arquitectura
+  d_model: 256
+  n_heads: 8
+  n_layers: 6
+  d_ff: 1024
+  max_seq_len: 512
+  dropout: 0.1
+
+  # Generación (inference)
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+
+# ---- Entrenamiento --------------------------------------------
+training:
+  epochs: 100
+  batch_size: 32
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  seed: 42
+  num_workers: 0
+  amp: false
+
+  # LR Scheduler
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  lr_min: 1.0e-6
+
+  # Checkpointing
+  checkpoint_dir: checkpoints/transformer_flat_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  save_last: true
+  save_top_k: 2
+
+  # Early Stopping
+  early_stopping: true
+  early_stopping_patience: 20
+  early_stopping_delta: 1.0e-4
+
+  # Logging
+  log_every: 50
+  val_every: 1
+  use_tensorboard: false
+  use_wandb: false
+
+  # EMA (beneficioso para modelos autoregresivos)
+  use_ema: false
+
+  # Splits
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+# ---- Datos ----------------------------------------------------
+data:
+  data_dir: data/pcap/
+  max_packets: null # null = todos los paquetes
+  protocols: null # null = todos los protocolos
+  max_payload_bytes: 20
