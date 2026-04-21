@@ -1,0 +1,110 @@
+{
+  "run_dir": "experiments\\runs\\2026-04-21_10-46-46_transformer_flat_v1",
+  "experiment_name": "transformer_flat_v1",
+  "representation": "flat_tokenizer",
+  "model": "transformer",
+  "best_epoch": 18,
+  "best_metric_name": "val_loss",
+  "best_metric_value": 2.5466117492088904,
+  "total_epochs_ran": 20,
+  "training_time_s": 1079.27,
+  "checkpoint_path": "experiments\\runs\\2026-04-21_10-46-46_transformer_flat_v1\\checkpoints\\transformer_flat_v1_epoch0020_val_loss=2.5469.pt",
+  "val_metrics": {
+    "val_loss": 2.546896971189059,
+    "val_perplexity": 14.061296389653133
+  },
+  "extra": {
+    "n_params": 11507456,
+    "generation_time_s": 9.512,
+    "reconstruction_time_s": 0.092,
+    "total_pipeline_time_s": 9.604
+  },
+  "eval_metrics": {
+    "statistical": {
+      "mean_emd": 22.9029541015625,
+      "mean_js_divergence": 0.8200996135569669,
+      "pearson_corr_matrix_distance": 0.9825314454191969
+    },
+    "urs": {
+      "fid": 147.3671451010065,
+      "mmd": 1.1941049098968506
+    },
+    "conditional": {
+      "conditional_accuracy": NaN,
+      "conditional_f1_macro": NaN
+    },
+    "structural": {
+      "token_out_of_range_rate": 0.0,
+      "non_integer_token_rate": 0.0,
+      "valid_sample_rate": 1.0
+    },
+    "traffic_structural": {
+      "packet_validity_rate": 1.0,
+      "flow_coherence_score": 1.0,
+      "tcp_handshake_validity_rate": 1.0,
+      "protocol_jsd": 0.15050978741585075,
+      "packet_size_emd": 259.61230041395623,
+      "inter_arrival_time_emd": 2.0512226919869643,
+      "bytes_per_flow_emd": 445.68518518518516,
+      "flow_duration_emd": 4.481766258113698,
+      "flow_packet_count_kl": 5.543115798062947
+    },
+    "_meta": {
+      "metric_priority": {
+        "primary": [
+          "statistical",
+          "urs"
+        ],
+        "critical": [
+          "conditional"
+        ],
+        "secondary": [
+          "structural",
+          "traffic_structural"
+        ],
+        "tertiary": [
+          "tstr",
+          "trtr",
+          "tstr_trtr",
+          "anomaly"
+        ]
+      },
+      "traffic_metrics_source": "raw_flows",
+      "sampling_strategy": "stratified_per_class",
+      "is_conditional_model": true,
+      "num_classes": 2
+    }
+  },
+  "reconstruction_paths": [
+    "experiments\\runs\\2026-04-21_10-46-46_transformer_flat_v1\\reconstructed\\class_0.pcap",
+    "experiments\\runs\\2026-04-21_10-46-46_transformer_flat_v1\\reconstructed\\class_1.pcap"
+  ],
+  "epoch_times": [
+    49.26,
+    47.933,
+    49.223,
+    53.582,
+    53.652,
+    51.942,
+    51.255,
+    51.757,
+    51.358,
+    51.311,
+    51.65,
+    51.539,
+    51.67,
+    51.719,
+    51.676,
+    51.821,
+    51.594,
+    51.833,
+    51.602,
+    51.848
+  ],
+  "seed": 42,
+  "pipeline_timing": {
+    "generation_time_s": 9.512,
+    "reconstruction_time_s": 0.092,
+    "total_pipeline_time_s": 9.604
+  }
+}

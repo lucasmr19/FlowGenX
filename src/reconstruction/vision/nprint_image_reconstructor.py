@@ -21,7 +21,7 @@ import torch
 import copy
 
 from src.reconstruction.base import (PacketWindowReconstructor, ReconstructionMeta)
-from src.data_utils.preprocessing import ParsedPacket
+from src.preprocessing import ParsedPacket
 from src.reconstruction.heuristics import (
     _NPRINT_FIELDS,
     assign_synthetic_ips,

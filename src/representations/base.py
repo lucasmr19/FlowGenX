@@ -24,7 +24,7 @@ from torch import Tensor
 
 from ..utils.logger_config import LOGGER
 
-from ..data_utils.preprocessing import PCAPPipeline
+from ..preprocessing import PCAPPipeline
 
 
 # ---------------------------------------------------------------------------

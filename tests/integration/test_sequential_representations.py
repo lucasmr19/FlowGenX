@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from pathlib import Path
 
-from src.data_utils.preprocessing import PCAPPipeline
+from src.preprocessing import PCAPPipeline
 from src.representations.sequential.tokenizer import (
     FlatTokenizer,
     ProtocolAwareTokenizer,

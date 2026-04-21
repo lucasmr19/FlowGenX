@@ -54,7 +54,7 @@ from src.representations.vision import (
     GAFRepresentation, GAFConfig,
     NprintImageRepresentation, NprintImageConfig,
 )
-from src.data_utils.loaders import build_datamodule_from_dir
+from src.datamodules import build_datamodule_from_dir
 from src.evaluation import (
     EvaluationSuite,
     SuiteResult,

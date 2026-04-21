@@ -16,7 +16,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-from src.data_utils.preprocessing import (
+from src.preprocessing import (
     PCAPPipeline,
     PacketWindowAggregator,
     TrafficChunkAggregator

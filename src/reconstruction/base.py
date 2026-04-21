@@ -51,7 +51,7 @@ from typing import Generic, List, Optional, TypeVar, Union
 
 import torch
 
-from src.data_utils.preprocessing import ParsedPacket, Flow, PacketWindow, TrafficChunk
+from src.preprocessing import ParsedPacket, Flow, PacketWindow, TrafficChunk
 from src.utils.logger_config import LOGGER
 
 ContainerT = TypeVar("ContainerT")

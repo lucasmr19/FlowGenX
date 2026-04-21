@@ -22,7 +22,7 @@ import time
 from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from src.data_utils.preprocessing import ParsedPacket
+from src.preprocessing import ParsedPacket
 from src.reconstruction.base import ReconstructionMeta, MOD32
 
 

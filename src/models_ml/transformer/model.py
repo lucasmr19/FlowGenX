@@ -185,6 +185,10 @@ class TrafficTransformer(GenerativeModel):
             num_layers    = cfg.n_layers,
             norm          = nn.LayerNorm(cfg.d_model),
         )
+        
+        if cfg.num_classes > 0:
+            self.label_emb = nn.Embedding(cfg.num_classes, cfg.d_model)
+            self.label_proj = nn.Linear(cfg.d_model, cfg.d_model)
 
         # --- Cabeza de lenguaje ---
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
@@ -200,6 +204,10 @@ class TrafficTransformer(GenerativeModel):
             "transformer": self.transformer,
             "lm_head":    self.lm_head,
         }
+        
+        if cfg.num_classes > 0:
+            self._networks["label_emb"] = self.label_emb
+            self._networks["label_proj"] = self.label_proj
 
         # Inicialización de pesos
         self._init_weights()
@@ -269,7 +277,7 @@ class TrafficTransformer(GenerativeModel):
             attention_mask = attention_mask.to(input_ids.device)
             key_padding_mask = (attention_mask == 0)
             if cond_emb is not None:
-                cond_mask = torch.ones((B, 1), dtype=torch.bool, device=input_ids.device)
+                cond_mask = torch.zeros((B, 1), dtype=torch.bool, device=input_ids.device)
                 key_padding_mask = torch.cat([cond_mask, key_padding_mask], dim=1)
         else:
             key_padding_mask = None
@@ -281,6 +289,7 @@ class TrafficTransformer(GenerativeModel):
             memory=x,
             tgt_mask=causal_mask,
             tgt_key_padding_mask=key_padding_mask,
+            memory_key_padding_mask=key_padding_mask,
         )
 
         logits = self.lm_head(out)  # (B, L+1, V) if conditional, else (B, L, V)
@@ -318,7 +327,7 @@ class TrafficTransformer(GenerativeModel):
 
         inputs = input_ids[:, :-1]
         targets = input_ids[:, 1:]
-        mask = attention_mask[:, 1:]
+        mask = attention_mask[:, :-1]
 
         logits = self.forward(inputs, attention_mask=mask, labels=labels)
 

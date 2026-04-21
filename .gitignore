@@ -11,6 +11,9 @@ env/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 
+# Model files
+.pt
+
 # Logs
 *.log
 

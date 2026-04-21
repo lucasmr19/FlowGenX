@@ -1,3 +1,18 @@
+# [FIX #1] Unified loss: single coherent scalar regardless of which
+# networks were updated this step.
+#
+# • Generator updated  → use loss_g  = -E[D(fake)]
+# • Generator NOT updated (n_critic cooldown) → use
+#   -wasserstein_dist = -(E[D(real)] - E[D(fake)])
+#   Both quantities share the same sign convention: lower is better.
+# [FIX #2] Use hard=True (straight-through estimator) instead of
+# hard=False. This produces one-hot gradients on the forward pass
+# while keeping a differentiable path on the backward pass,
+# reducing the mismatch between training embeddings and the
+# real token embeddings seen at inference time. The discriminator
+# receives inputs much closer to its real-data distribution,
+# which stabilises the adversarial training signal.
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -36,6 +51,10 @@ class LSTMGenerator(nn.Module):
         is conditional.
       - If labels are omitted in conditional mode, labels are sampled
         uniformly. This keeps backward compatibility.
+
+    Changes from original:
+      [FIX #2] gumbel_softmax now uses hard=True (straight-through estimator)
+               to reduce train/inference mismatch and stabilize discriminator.
     """
 
     def __init__(self, config: GANConfig) -> None:
@@ -135,7 +154,8 @@ class LSTMGenerator(nn.Module):
             Gumbel-softmax temperature used when sample_hard=False.
         sample_hard:
             If True, the output tokens are obtained by argmax on logits.
-            If False, a differentiable soft sample is used for embeddings.
+            If False, a differentiable straight-through hard sample is used
+            for embeddings (reduces train/inference mismatch).
 
         Returns
         -------
@@ -188,7 +208,7 @@ class LSTMGenerator(nn.Module):
                 token = torch.argmax(logit, dim=-1)
                 emb = self.token_emb(token)
             else:
-                probs = F.gumbel_softmax(logit, tau=temperature, hard=False, dim=-1)
+                probs = F.gumbel_softmax(logit, tau=temperature, hard=True, dim=-1)
                 token = torch.argmax(probs, dim=-1)
                 emb = probs @ self.token_emb.weight
 
@@ -394,6 +414,7 @@ class TrafficGAN(GenerativeModel):
       - train_step_discriminator()
       - train_step_generator()
       - generate()
+      - get_metrics_schema()       [NEW] canonical metric schema for trainers/loggers
 
     Conditioning behavior:
       - If cfg.num_classes > 0, labels are used consistently in both
@@ -407,6 +428,7 @@ class TrafficGAN(GenerativeModel):
         super().__init__(config)
         self.cfg = config
         self._train_step_count = 0
+        self._ema_generator: Optional[nn.Module] = None
 
     @property
     def model_type(self) -> ModelType:
@@ -416,12 +438,28 @@ class TrafficGAN(GenerativeModel):
     def input_domain(self) -> InputDomain:
         return InputDomain.DISCRETE_SEQUENCE
 
+    # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
+
     def build(self) -> "TrafficGAN":
         cfg = self.cfg
         torch.manual_seed(cfg.seed)
 
         self.generator = LSTMGenerator(cfg).to(self.device)
         self.discriminator = TransformerDiscriminator(cfg).to(self.device)
+
+        # [NEW #6] Exponential Moving Average copy of the generator.
+        # Used only at inference time; never receives gradients.
+        ema_decay = getattr(cfg, "ema_decay", 0.999)
+        if ema_decay > 0.0:
+            self._ema_generator = LSTMGenerator(cfg).to(self.device)
+            self._ema_generator.load_state_dict(self.generator.state_dict())
+            for p in self._ema_generator.parameters():
+                p.requires_grad_(False)
+            self._ema_decay = ema_decay
+        else:
+            self._ema_generator = None
 
         self._networks = {
             "generator": self.generator,
@@ -431,23 +469,50 @@ class TrafficGAN(GenerativeModel):
         LOGGER.info("TrafficGAN built: %s", self)
         return self
 
+    # ------------------------------------------------------------------
+    # EMA helpers
+    # ------------------------------------------------------------------
+
+    def _update_ema(self) -> None:
+        """Update the EMA generator weights after each generator step."""
+        if self._ema_generator is None:
+            return
+        decay = self._ema_decay
+        with torch.no_grad():
+            for ema_p, gen_p in zip(
+                self._ema_generator.parameters(), self.generator.parameters()
+            ):
+                ema_p.data.mul_(decay).add_(gen_p.data, alpha=1.0 - decay)
+
+    # ------------------------------------------------------------------
+    # Optimizers
+    # ------------------------------------------------------------------
+
     def configure_optimizers(
         self, lr: float = 1e-4
     ) -> Dict[str, torch.optim.Optimizer]:
         """
         Create independent optimizers for generator and discriminator.
         """
+        lr_g = float(getattr(self.cfg, "lr_opt_g", lr))
+        lr_d = float(getattr(self.cfg, "lr_opt_d", lr))
+
         opt_g = torch.optim.Adam(
             self.generator.parameters(),
-            lr=lr,
+            lr=lr_g,
             betas=(0.0, 0.9),
         )
         opt_d = torch.optim.Adam(
             self.discriminator.parameters(),
-            lr=lr,
+            lr=lr_d,
             betas=(0.0, 0.9),
         )
+        
         return {"generator": opt_g, "discriminator": opt_d}
+
+    # ------------------------------------------------------------------
+    # Batch helpers
+    # ------------------------------------------------------------------
 
     def _extract_batch(self, batch: Any) -> Tuple[Tensor, Optional[Tensor]]:
         """
@@ -455,7 +520,7 @@ class TrafficGAN(GenerativeModel):
 
         Supported formats:
           - Tensor: tokens only
-          - tuple/list: (tokens, labels?) 
+          - tuple/list: (tokens, labels?)
           - dict: {"tokens": ..., "y": ...} or compatible aliases
         """
         if isinstance(batch, torch.Tensor):
@@ -489,9 +554,6 @@ class TrafficGAN(GenerativeModel):
     ) -> Optional[Tensor]:
         """
         Normalize labels for generation to a tensor on the correct device.
-
-        This preserves the generate() API while accepting the same kinds of
-        label inputs as before.
         """
         if labels is None:
             return self._sample_labels(n_samples)
@@ -510,6 +572,10 @@ class TrafficGAN(GenerativeModel):
 
         return y
 
+    # ------------------------------------------------------------------
+    # Training steps
+    # ------------------------------------------------------------------
+
     def train_step(self, batch: Any) -> Dict[str, Tensor]:
         """
         Run one joint training step.
@@ -517,6 +583,21 @@ class TrafficGAN(GenerativeModel):
         The discriminator is updated first, then the generator every
         n_critic steps. For conditional training, the same labels tensor
         is reused consistently within the batch.
+
+        Returns
+        -------
+        Dict containing all individual losses plus:
+          - ``loss``:         alias for ``unified_loss`` (used by trainer/callbacks).
+          - ``unified_loss``: coherent scalar for logging, checkpointing, and
+                              early stopping across D-only and G+D steps.
+
+        Changes:
+          [FIX #1] ``unified_loss`` is defined explicitly instead of mixing
+                   loss_g and loss_d scales.  When the generator is updated
+                   in this step, unified_loss = loss_g (already on a
+                   consistent scale: -E[D(fake)]).  When only the discriminator
+                   runs (n_critic cooldown), unified_loss = -wasserstein_dist,
+                   which shares the same scale and sign convention as loss_g.
         """
         self._check_built()
         self._train_step_count += 1
@@ -554,9 +635,21 @@ class TrafficGAN(GenerativeModel):
                 batch_size=real_tokens.shape[0],
                 labels=labels,
             )
+            # [NEW #6] Keep EMA weights in sync after every generator update.
+            self._update_ema()
 
-        active_loss = losses_g.get("loss_g", losses_d["loss_d"])
-        return {**losses_d, **losses_g, "loss": active_loss}
+
+        if "loss_g" in losses_g:
+            unified_loss: Tensor = losses_g["loss_g"]
+        else:
+            unified_loss = -losses_d["wasserstein_dist"]
+
+        return {
+            **losses_d,
+            **losses_g,
+            "loss": unified_loss,
+            "unified_loss": unified_loss,
+        }
 
     def train_step_discriminator(
         self,
@@ -571,7 +664,10 @@ class TrafficGAN(GenerativeModel):
           - real samples: D(x_real, y)
           - fake samples: D(G(z, y), y)
 
-        This is the correct conditioning contract for a conditional GAN.
+        Changes:
+          [FIX #3, #4] _gradient_penalty now receives real_tokens so it can
+                       project real embeddings to disc_d_model before
+                       interpolating, and propagate the correct padding_mask.
         """
         B = real_tokens.shape[0]
         real_tokens = real_tokens.to(self.device)
@@ -676,6 +772,10 @@ class TrafficGAN(GenerativeModel):
             "d_fake_g": d_fake.mean().detach(),
         }
 
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
+
     @torch.no_grad()
     def generate(
         self,
@@ -687,6 +787,8 @@ class TrafficGAN(GenerativeModel):
         """
         Generate discrete sequences from the GAN.
 
+        Uses the EMA generator when available for more stable outputs.
+
         Parameters
         ----------
         n_samples:
@@ -694,16 +796,10 @@ class TrafficGAN(GenerativeModel):
         temperature:
             Sampling temperature passed to the generator.
         labels:
-            Optional class conditioning. Accepts:
-              - int
-              - list[int]
-              - tuple[int, ...]
-              - Tensor
-            For unconditional models, this argument is ignored.
+            Optional class conditioning. Accepts: int, list[int],
+            tuple[int, ...], or Tensor.  Ignored for unconditional models.
         **kwargs:
-            Preserved for backward compatibility. The method accepts extra
-            keyword arguments without changing the public API. A common
-            accepted key is:
+            Preserved for backward compatibility.
               - return_labels: bool
 
         Returns
@@ -721,12 +817,19 @@ class TrafficGAN(GenerativeModel):
         y_tensor = self._normalize_labels(labels, n_samples)
 
         z = torch.randn(n_samples, self.cfg.latent_dim, device=self.device)
-        out = self.generator(z, labels=y_tensor, temperature=temperature, sample_hard=True)
+
+        # [NEW #6] Prefer the EMA generator at inference time.
+        gen = self._ema_generator if self._ema_generator is not None else self.generator
+        out = gen(z, labels=y_tensor, temperature=temperature, sample_hard=True)
         tokens = out["tokens"]
 
         if return_labels:
             return tokens, y_tensor
         return tokens
+
+    # ------------------------------------------------------------------
+    # Gradient penalty
+    # ------------------------------------------------------------------
 
     def _gradient_penalty(
         self,
@@ -736,18 +839,41 @@ class TrafficGAN(GenerativeModel):
     ) -> Tensor:
         """
         WGAN-GP penalty computed in embedding space.
+
+        Changes:
+          [FIX #3] Real token embeddings are projected to disc_d_model before
+                   interpolation so that both endpoints of the linear
+                   interpolation live in the *same* space. Previously, real
+                   embeddings were in gen_hidden space while fake embeddings
+                   had already been projected, which broke the Lipschitz
+                   constraint the penalty is meant to enforce.
+
+          [FIX #4] The padding mask derived from real_tokens is forwarded to
+                   _forward_embeddings so that padding positions are correctly
+                   excluded from the gradient computation. Ignoring the mask
+                   causes the gradient norm to be inflated by padded tokens,
+                   making the 1-Lipschitz target harder to satisfy.
         """
         B = real_tokens.shape[0]
 
         real_embeddings = self.discriminator.token_emb(real_tokens)
+        if real_embeddings.shape[-1] != self.cfg.disc_d_model:
+            real_embeddings = self.discriminator.input_proj(real_embeddings)
 
+        # Fake embeddings may still be in gen_hidden space — normalise them too.
         if fake_embeddings.shape[-1] != self.cfg.disc_d_model:
             fake_embeddings = self.discriminator.input_proj(fake_embeddings)
 
         eps = torch.rand(B, 1, 1, device=self.device)
         interp = (eps * real_embeddings + (1.0 - eps) * fake_embeddings).requires_grad_(True)
 
-        score = self.discriminator._forward_embeddings(interp, labels=labels, padding_mask=None)
+        padding_mask = real_tokens.eq(self.cfg.pad_token_id)
+
+        score = self.discriminator._forward_embeddings(
+            interp,
+            labels=labels,
+            padding_mask=padding_mask,
+        )
 
         grads = torch.autograd.grad(
             outputs=score,
@@ -761,3 +887,38 @@ class TrafficGAN(GenerativeModel):
         grad_norm = grads.flatten(1).norm(2, dim=1)
         gp = ((grad_norm - 1.0) ** 2).mean()
         return gp
+
+    # ------------------------------------------------------------------
+    # Metrics schema
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_metrics_schema() -> Dict[str, Optional[str]]:
+        """
+        Return a canonical description of every metric produced by train_step.
+
+        Trainers and loggers should use this schema instead of hardcoding key
+        names, so that future metric additions are automatically picked up.
+
+        Returns
+        -------
+        Dict mapping metric key → human-readable description (or None).
+
+        Usage example in a trainer
+        --------------------------
+        >>> schema = TrafficGAN.get_metrics_schema()
+        >>> metrics = {k: out.get(k) for k in schema}
+        """
+        return {
+            # Core losses
+            "loss":             "Alias for unified_loss; used by trainer callbacks.",
+            "unified_loss":     "Coherent scalar for logging/checkpointing/early-stopping.",
+            "loss_d":           "WGAN discriminator loss = E[D(fake)] - E[D(real)].",
+            "loss_g":           "Generator loss = -E[D(fake)].  None on D-only steps.",
+            # Discriminator internals
+            "d_real":           "Mean discriminator score on real samples.",
+            "d_fake":           "Mean discriminator score on fake samples (D step).",
+            "d_fake_g":         "Mean discriminator score on fake samples (G step).",
+            "wasserstein_dist": "Wasserstein estimate = E[D(real)] - E[D(fake)].",
+            "gradient_penalty": "WGAN-GP gradient penalty term (0 if disabled).",
+        }

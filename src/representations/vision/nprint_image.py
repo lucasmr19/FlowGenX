@@ -211,7 +211,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from .nprint import NprintConfig, NprintRepresentation
-from ...data_utils.preprocessing import PacketWindow, ParsedPacket
+from ...preprocessing import PacketWindow, ParsedPacket
 from ...utils.logger_config import LOGGER
 
 
@@ -533,7 +533,7 @@ class NprintImageRepresentation(NprintRepresentation):
         return self._decode_from_bit_matrix(full)
     
     def get_default_aggregator(self):
-        from ...data_utils.preprocessing import PacketWindowAggregator
+        from ...preprocessing import PacketWindowAggregator
         return PacketWindowAggregator
     
     def _fast_project(self, x: torch.Tensor) -> torch.Tensor:

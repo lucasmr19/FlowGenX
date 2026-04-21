@@ -13,6 +13,7 @@ Callbacks disponibles
 - CheckpointCallback      : Guarda los mejores y/o último checkpoint.
 - EarlyStoppingCallback   : Para el entrenamiento si la métrica se estanca.
 - MetricsLoggerCallback   : Escribe métricas en CSV y consola estructurada.
+- TimingCallback          : Registra tiempos por época y total en JSON.
 - TensorBoardCallback     : Escribe eventos SummaryWriter (TensorBoard).
 - EMACallback             : Mantiene y aplica Exponential Moving Average.
 - WandbCallback           : Integración opcional con Weights & Biases.
@@ -55,6 +56,8 @@ class TrainerState:
     best_epoch:  int   = 0
     stop_training: bool = False
     checkpoint_path: Optional[str] = None  # ruta del último checkpoint guardado
+    # Registro de tiempos por época (segundos)
+    epoch_times: List[float] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +148,10 @@ class CheckpointCallback(TrainerCallback):
         save_top_k: int  = 1,
         experiment_name: str = "exp",
     ) -> None:
+        if save_top_k < 0:
+            raise ValueError("save_top_k must be >= 0")
+        if mode not in {"min", "max"}:
+            raise ValueError("mode must be 'min' or 'max'")
         self.dir    = Path(checkpoint_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.metric = metric
@@ -152,59 +159,68 @@ class CheckpointCallback(TrainerCallback):
         self.model  = model
         self.rep    = representation
         self.save_last  = save_last
-        self.save_top_k = save_top_k
         self.exp_name   = experiment_name
-
+        self.save_top_k = save_top_k
+        self._best_value = float("inf") if mode == "min" else -float("inf")
         # Heap de (score, path) — min-heap
         # Para mode="max", guardamos -score
         self._top_k_heap: List[tuple] = []
-
-    def _score(self, value: float) -> float:
-        return value if self.mode == "min" else -value
+    
+    def _priority(self, value: float) -> float:
+        # Más alto = mejor
+        return -value if self.mode == "min" else value
 
     def on_validation_end(self, state: TrainerState) -> None:
         if self.metric not in state.val_metrics:
             return
 
         value = state.val_metrics[self.metric]
-        score = self._score(value)
 
-        # ---- guardar candidato ----
-        fname = (
-            f"{self.exp_name}_epoch{state.epoch:04d}"
-            f"_{self.metric}={value:.4f}.pt"
+        # ---- best tracking independiente del top-k ----
+        is_better = (
+            value < self._best_value if self.mode == "min"
+            else value > self._best_value
         )
-        path  = self.dir / fname
-
-        # Solo guardamos si es top-k
-        if len(self._top_k_heap) < self.save_top_k:
-            self._save(path, state)
-            heapq.heappush(self._top_k_heap, (score, str(path)))
-            state.checkpoint_path = str(path)
-        elif score < self._top_k_heap[0][0]:
-            # Eliminar el peor
-            _, old_path = heapq.heappop(self._top_k_heap)
-            _safe_remove(old_path)
-            self._save(path, state)
-            heapq.heappush(self._top_k_heap, (score, str(path)))
-            state.checkpoint_path = str(path)
-
-        # ---- best epoch tracking ----
-        if not self._top_k_heap:
-            return
-        best_score = min(s for s, _ in self._top_k_heap)
-        if score == best_score:
+        if is_better:
+            self._best_value = value
             state.best_metric = value
-            state.best_epoch  = state.epoch
+            state.best_epoch = state.epoch
 
-        # ---- last.pt ----
+        # ---- save_last siempre que proceda ----
+        last_path = None
         if self.save_last:
             last_path = self.dir / f"{self.exp_name}_last.pt"
             self._save(last_path, state)
 
+        # ---- top-k desactivado ----
+        if self.save_top_k == 0:
+            if last_path is not None:
+                state.checkpoint_path = str(last_path)
+            return
+
+        priority = self._priority(value)
+
+        fname = (
+            f"{self.exp_name}_epoch{state.epoch:04d}"
+            f"_{self.metric}={value:.4f}.pt"
+        )
+        path = self.dir / fname
+
+        # ---- guardar si entra en top-k ----
+        if len(self._top_k_heap) < self.save_top_k:
+            self._save(path, state)
+            heapq.heappush(self._top_k_heap, (priority, str(path)))
+            state.checkpoint_path = str(path)
+
+        elif priority > self._top_k_heap[0][0]:
+            # El peor de los guardados es heap[0]
+            _, old_path = heapq.heapreplace(self._top_k_heap, (priority, str(path)))
+            _safe_remove(old_path)
+            self._save(path, state)
+            state.checkpoint_path = str(path)
+
     def _save(self, path: Path, state: TrainerState) -> None:
         self.model.save(path)
-        # Guardar representación junto al modelo
         rep_path = path.with_suffix(".rep.pt")
         self.rep.save(rep_path)
         LOGGER.info(
@@ -286,6 +302,10 @@ class MetricsLoggerCallback(TrainerCallback):
     Registra todas las métricas por época en un CSV y en consola.
 
     Fichero de salida: ``{log_dir}/{experiment_name}_metrics.csv``
+
+    El CSV se escribe completo al final del entrenamiento para garantizar
+    que el header refleje todas las columnas posibles (incluyendo las
+    métricas de validación que solo aparecen a partir de val_every > 1).
     """
 
     def __init__(
@@ -299,16 +319,20 @@ class MetricsLoggerCallback(TrainerCallback):
         self.log_every = log_every
         self.exp_name  = experiment_name
 
-        self._csv_path   = self.log_dir / f"{experiment_name}_metrics.csv"
-        self._csv_writer = None
-        self._csv_file   = None
-        self._fieldnames: Optional[List[str]] = None
+        self._csv_path = self.log_dir / f"{experiment_name}_metrics.csv"
+
+        # Buffer: acumulamos filas y columnas hasta on_train_end
+        self._rows:     list = []
+        self._all_keys: list = ["epoch", "train_loss"]
 
         # Buffer para promedios de batch dentro de la época
         self._batch_losses: Dict[str, List[float]] = {}
 
     def on_train_start(self, state: TrainerState) -> None:
-        self._csv_file = open(self._csv_path, "w", newline="")
+        # Reset por si el callback se reutiliza
+        self._rows      = []
+        self._all_keys  = ["epoch", "train_loss"]
+        self._batch_losses = {}
 
     def on_batch_end(
         self,
@@ -330,7 +354,7 @@ class MetricsLoggerCallback(TrainerCallback):
             )
 
     def on_epoch_end(self, state: TrainerState) -> None:
-        row = {
+        row: Dict[str, str] = {
             "epoch":      state.epoch,
             "train_loss": f"{state.train_loss:.6f}",
         }
@@ -338,26 +362,25 @@ class MetricsLoggerCallback(TrainerCallback):
             {k: f"{v:.6f}" for k, v in state.val_metrics.items()}
         )
 
-        if self._fieldnames is None:
-            self._fieldnames = list(row.keys())
-            self._csv_writer = csv.DictWriter(
-                self._csv_file,
-                fieldnames=self._fieldnames,
-                extrasaction="ignore",
-            )
-            self._csv_writer.writeheader()
-
-        # Añadir columnas nuevas dinámicamente si las hay
+        # Registrar columnas nuevas (mantiene orden de aparición)
         for k in row:
-            if k not in self._fieldnames:
-                self._fieldnames.append(k)
+            if k not in self._all_keys:
+                self._all_keys.append(k)
 
-        self._csv_writer.writerow(row)
-        self._csv_file.flush()
+        self._rows.append(row)
 
     def on_train_end(self, state: TrainerState) -> None:
-        if self._csv_file and not self._csv_file.closed:
-            self._csv_file.close()
+        """Escribe el CSV completo con header correcto al terminar el entrenamiento."""
+        with open(self._csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames   = self._all_keys,
+                extrasaction = "ignore",
+                restval      = "",          # columnas ausentes → celda vacía
+            )
+            writer.writeheader()
+            for row in self._rows:
+                writer.writerow(row)
         LOGGER.info("[Metrics] Log guardado en %s", self._csv_path)
 
 
@@ -374,13 +397,12 @@ class TensorBoardCallback(TrainerCallback):
     """
 
     def __init__(self, log_dir: str, experiment_name: str = "exp") -> None:
-        try:
-            from torch.utils.tensorboard import SummaryWriter
-        except ImportError:
-            raise ImportError(
-                "TensorBoard no encontrado. Instala con: pip install tensorboard"
-            )
-        tb_path    = Path(log_dir) / "tb_logs" / experiment_name
+        from torch.utils.tensorboard import SummaryWriter
+        tb_path = Path(log_dir)
+        # Si por alguna razón el path apunta a un fichero, usamos un sufijo
+        if tb_path.exists() and not tb_path.is_dir():
+            tb_path = tb_path.parent / (tb_path.name + "_tb")
+        tb_path.mkdir(parents=True, exist_ok=True)
         self.writer = SummaryWriter(log_dir=str(tb_path))
         LOGGER.info("[TensorBoard] Logs en %s", tb_path)
 
@@ -521,9 +543,61 @@ class WandbCallback(TrainerCallback):
         self._wandb.finish()
 
 
+
 # ---------------------------------------------------------------------------
-# Utilidades internas
+# TimingCallback
 # ---------------------------------------------------------------------------
+
+class TimingCallback(TrainerCallback):
+    """
+    Registra el tiempo de entrenamiento por época y el total acumulado.
+
+    Al finalizar el entrenamiento guarda un JSON estructurado en
+    ``{log_dir}/{experiment_name}_timing.json`` con:
+        - epoch_times: lista de segundos por época
+        - total_training_s: tiempo total de entrenamiento
+        - mean_epoch_s: media de segundos por época
+        - median_epoch_s: mediana de segundos por época
+
+    Los tiempos también se guardan en ``state.epoch_times`` para que
+    otros callbacks y el ExperimentRunner puedan acceder a ellos.
+    """
+
+    def __init__(
+        self,
+        log_dir: str,
+        experiment_name: str = "exp",
+    ) -> None:
+        self.log_dir  = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.exp_name = experiment_name
+        self._json_path = self.log_dir / f"{experiment_name}_timing.json"
+        self._epoch_start: float = 0.0
+
+    def on_epoch_start(self, state: TrainerState) -> None:
+        import time
+        self._epoch_start = time.time()
+
+    def on_epoch_end(self, state: TrainerState) -> None:
+        import time
+        elapsed = round(time.time() - self._epoch_start, 3)
+        state.epoch_times.append(elapsed)
+
+    def on_train_end(self, state: TrainerState) -> None:
+        import json, statistics
+        times = state.epoch_times
+        summary = {
+            "epoch_times": times,
+            "total_training_s": round(sum(times), 3),
+            "mean_epoch_s":   round(statistics.mean(times), 3)   if times else 0,
+            "median_epoch_s": round(statistics.median(times), 3) if times else 0,
+            "min_epoch_s":    round(min(times), 3)                if times else 0,
+            "max_epoch_s":    round(max(times), 3)                if times else 0,
+        }
+        with open(self._json_path, "w") as f:
+            json.dump(summary, f, indent=2)
+        LOGGER.info("[Timing] JSON guardado en %s", self._json_path)
+
 
 def _safe_remove(path: str) -> None:
     try:
@@ -545,4 +619,5 @@ __all__ = [
     "TensorBoardCallback",
     "EMACallback",
     "WandbCallback",
+    "TimingCallback",
 ]

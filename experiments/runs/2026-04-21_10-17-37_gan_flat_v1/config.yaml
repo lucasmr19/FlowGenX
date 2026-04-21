@@ -1,0 +1,71 @@
+data:
+  data_dir: data/pcap/
+  max_packets: 500
+  max_payload_bytes: 20
+  protocols: null
+evaluation:
+  tasks:
+    anomaly: false
+    max_features: 256
+    trtr: true
+    tstr: true
+    tstr_trtr: false
+experiment_name: gan_flat_v1
+model:
+  cond_dim: 32
+  disc_d_ff: 128
+  disc_d_model: 96
+  disc_dropout: 0.1
+  disc_n_heads: 8
+  disc_n_layers: 1
+  gen_dropout: 0.1
+  gen_hidden: 512
+  gen_layers: 2
+  gen_temperature: 0.8
+  lambda_gp: 10.0
+  latent_dim: 128
+  lr_opt_d: 2.0e-05
+  lr_opt_g: 0.00015
+  model_type: gan
+  n_critic: 4
+  name: gan_flat_v1
+  num_classes: 2
+  pad_token_id: 0
+  seq_len: 128
+  use_gradient_penalty: true
+  vocab_size: 10000
+representation:
+  max_length: 128
+  name: flat_tokenizer_v1
+  normalization: null
+  representation_type: flat_tokenizer
+training:
+  amp: false
+  batch_size: 64
+  checkpoint_dir: checkpoints/gan_flat_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  early_stopping: true
+  early_stopping_delta: 0.001
+  early_stopping_patience: 40
+  ema_decay: 0.999
+  ema_start: 10
+  epochs: 20
+  grad_clip: 1.0
+  log_every: 20
+  lr: 5.0e-05
+  lr_min: 1.0e-06
+  lr_scheduler: cosine
+  num_workers: 0
+  save_last: true
+  save_top_k: 0
+  seed: 42
+  test_ratio: 0.15
+  train_ratio: 0.7
+  use_ema: true
+  use_tensorboard: true
+  use_wandb: false
+  val_every: 2
+  val_ratio: 0.15
+  warmup_epochs: 10
+  weight_decay: 0.0

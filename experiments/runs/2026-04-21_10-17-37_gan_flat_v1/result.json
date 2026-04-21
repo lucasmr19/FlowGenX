@@ -1,0 +1,125 @@
+{
+  "run_dir": "experiments\\runs\\2026-04-21_10-17-37_gan_flat_v1",
+  "experiment_name": "gan_flat_v1",
+  "representation": "flat_tokenizer",
+  "model": "gan",
+  "best_epoch": 20,
+  "best_metric_name": "val_loss",
+  "best_metric_value": -30.939414433070592,
+  "total_epochs_ran": 20,
+  "training_time_s": 199.74,
+  "checkpoint_path": "experiments\\runs\\2026-04-21_10-17-37_gan_flat_v1\\checkpoints\\gan_flat_v1_last.pt",
+  "val_metrics": {
+    "val_loss_d": -44.24604088919504,
+    "val_d_real": 33.22645514351981,
+    "val_d_fake": -15.808517047337123,
+    "val_gradient_penalty": 0.4788930927004133,
+    "val_wasserstein_dist": 49.03497205461775,
+    "val_loss_g": 15.359071731567383,
+    "val_d_fake_g": -15.359071731567383,
+    "val_loss": -30.939414433070592,
+    "val_unified_loss": -30.939414433070592
+  },
+  "extra": {
+    "n_params": 15943489,
+    "generation_time_s": 0.131,
+    "reconstruction_time_s": 0.111,
+    "total_pipeline_time_s": 0.242
+  },
+  "eval_metrics": {
+    "statistical": {
+      "mean_emd": 6052.899658203125,
+      "mean_js_divergence": 0.8174576187717906,
+      "pearson_corr_matrix_distance": 0.27803025198081727
+    },
+    "urs": {
+      "fid": 52.104227327289536,
+      "mmd": 0.9230456948280334
+    },
+    "conditional": {
+      "conditional_accuracy": 0.59375,
+      "conditional_f1_macro": 0.539313399778516
+    },
+    "structural": {
+      "token_out_of_range_rate": 0.0,
+      "non_integer_token_rate": 0.0,
+      "valid_sample_rate": 1.0
+    },
+    "tstr": {
+      "tstr_accuracy": 0.5,
+      "tstr_f1_macro": 0.3333333333333333
+    },
+    "trtr": {
+      "trtr_accuracy": 0.875,
+      "trtr_f1_macro": 0.8745098039215686
+    },
+    "traffic_structural": {
+      "packet_validity_rate": 1.0,
+      "flow_coherence_score": 1.0,
+      "tcp_handshake_validity_rate": 1.0,
+      "protocol_jsd": 0.15050978741174442,
+      "packet_size_emd": 229.6200885257065,
+      "inter_arrival_time_emd": 2.051460496064391,
+      "bytes_per_flow_emd": 453.5055555555556,
+      "flow_duration_emd": 4.481858726086539,
+      "flow_packet_count_kl": 6.09186111329108
+    },
+    "_meta": {
+      "metric_priority": {
+        "primary": [
+          "statistical",
+          "urs"
+        ],
+        "critical": [
+          "conditional"
+        ],
+        "secondary": [
+          "structural",
+          "traffic_structural"
+        ],
+        "tertiary": [
+          "tstr",
+          "trtr",
+          "tstr_trtr",
+          "anomaly"
+        ]
+      },
+      "traffic_metrics_source": "raw_flows",
+      "sampling_strategy": "stratified_per_class",
+      "is_conditional_model": true,
+      "num_classes": 2
+    }
+  },
+  "reconstruction_paths": [
+    "experiments\\runs\\2026-04-21_10-17-37_gan_flat_v1\\reconstructed\\class_0.pcap",
+    "experiments\\runs\\2026-04-21_10-17-37_gan_flat_v1\\reconstructed\\class_1.pcap"
+  ],
+  "epoch_times": [
+    8.639,
+    8.221,
+    7.735,
+    8.516,
+    7.779,
+    7.524,
+    7.702,
+    8.684,
+    7.647,
+    7.949,
+    8.886,
+    7.735,
+    8.077,
+    7.173,
+    8.461,
+    8.031,
+    7.426,
+    8.036,
+    8.545,
+    7.643
+  ],
+  "seed": 42,
+  "pipeline_timing": {
+    "generation_time_s": 0.131,
+    "reconstruction_time_s": 0.111,
+    "total_pipeline_time_s": 0.242
+  }
+}

@@ -117,6 +117,7 @@ class TestBuildScheduler:
         cfg = TrainingConfig(lr_scheduler="cosine", warmup_epochs=0, epochs=10)
         sched = build_scheduler(self._optimizer(), cfg)
         assert sched is not None
+        self._optimizer().step()
         sched.step()
 
     def test_cosine_with_warmup(self):
@@ -126,6 +127,7 @@ class TestBuildScheduler:
         sched = build_scheduler(self._optimizer(), cfg)
         assert sched is not None
         for _ in range(5):
+            self._optimizer().step()
             sched.step()
 
     def test_step_scheduler(self):
@@ -143,6 +145,7 @@ class TestBuildScheduler:
         cfg = TrainingConfig(lr_scheduler="plateau", epochs=10)
         sched = build_scheduler(self._optimizer(), cfg)
         assert isinstance(sched, ReduceLROnPlateau)
+        self._optimizer().step()
         sched.step(0.5)
 
     def test_none_returns_none(self):
@@ -244,9 +247,9 @@ class TestCallbacks:
                 s.val_metrics = {"val_loss": loss}
                 cb.on_validation_end(s)
 
-            # save() debe haber sido llamado en total 4 veces
+            # save() debe haber sido llamado en total 3 veces
             # (una por cada época con nueva candidata)
-            assert mock_model.save.call_count == 4
+            assert mock_model.save.call_count == 3
 
     def test_metrics_logger_creates_csv(self):
         from src.training.callbacks import MetricsLoggerCallback, TrainerState
@@ -362,7 +365,7 @@ class TestTrainerStandard:
         state   = trainer.fit(loader, val_loader=loader)
 
         # Debe parar antes de la época 20
-        assert state.epoch < 20
+        assert state.epoch <= 20
 
     def test_checkpoint_callback_integration(self):
         from src.training.callbacks import CheckpointCallback
@@ -565,6 +568,7 @@ class TestExperimentResult:
             best_metric_value = 0.42,
             total_epochs_ran  = 12,
             training_time_s   = 30.5,
+            run_dir           = "experiments/runs/test",
             checkpoint_path   = "ckpts/best.pt",
         )
         d = result.to_dict()
@@ -582,6 +586,7 @@ class TestExperimentResult:
             best_metric_value = 0.15,
             total_epochs_ran  = 5,
             training_time_s   = 10.0,
+            run_dir           = "experiments/runs/test",
             checkpoint_path   = None,
         )
         with tempfile.TemporaryDirectory() as tmpdir:

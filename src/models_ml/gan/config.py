@@ -47,3 +47,5 @@ class GANConfig(GenerativeModelConfig):
     lambda_gp:        float = 10.0   # peso del gradient penalty
     clip_value:       float = 0.01   # solo si use_gradient_penalty=False
     use_gradient_penalty: bool = True
+    lr_opt_g: float = 5.0e-5
+    lr_opt_d: float = 2.0e-5

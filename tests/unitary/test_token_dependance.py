@@ -18,7 +18,7 @@ from src.representations import (
     GAFConfig, GAFRepresentation,
     NprintImageConfig, NprintImageRepresentation,
 )
-from src.data_utils.loaders import build_datamodule_from_dir
+from src.datamodules import build_datamodule_from_dir
 from src.reconstruction.build import build_reconstructor
 
 DATA_DIR = Path("data/pcap")

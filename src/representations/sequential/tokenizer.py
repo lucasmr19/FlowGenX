@@ -22,7 +22,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ...data_utils.preprocessing import Flow, ParsedPacket
+from ...preprocessing import Flow, ParsedPacket
 from ..base import (
     Invertibility,
     RepresentationConfig,
@@ -302,7 +302,7 @@ class FlatTokenizer(TrafficRepresentation):
         return self.vocab.decode_sequence(ids)
     
     def get_default_aggregator(self):
-        from ...data_utils.preprocessing import FlowAggregator
+        from ...preprocessing import FlowAggregator
         return FlowAggregator
     
     def project(self, x: torch.Tensor, **kwargs) -> torch.Tensor:

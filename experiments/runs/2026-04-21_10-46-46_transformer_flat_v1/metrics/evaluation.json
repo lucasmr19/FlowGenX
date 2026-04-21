@@ -1,0 +1,56 @@
+{
+  "statistical": {
+    "mean_emd": 22.9029541015625,
+    "mean_js_divergence": 0.8200996135569669,
+    "pearson_corr_matrix_distance": 0.9825314454191969
+  },
+  "urs": {
+    "fid": 147.3671451010065,
+    "mmd": 1.1941049098968506
+  },
+  "conditional": {
+    "conditional_accuracy": NaN,
+    "conditional_f1_macro": NaN
+  },
+  "structural": {
+    "token_out_of_range_rate": 0.0,
+    "non_integer_token_rate": 0.0,
+    "valid_sample_rate": 1.0
+  },
+  "traffic_structural": {
+    "packet_validity_rate": 1.0,
+    "flow_coherence_score": 1.0,
+    "tcp_handshake_validity_rate": 1.0,
+    "protocol_jsd": 0.15050978741585075,
+    "packet_size_emd": 259.61230041395623,
+    "inter_arrival_time_emd": 2.0512226919869643,
+    "bytes_per_flow_emd": 445.68518518518516,
+    "flow_duration_emd": 4.481766258113698,
+    "flow_packet_count_kl": 5.543115798062947
+  },
+  "_meta": {
+    "metric_priority": {
+      "primary": [
+        "statistical",
+        "urs"
+      ],
+      "critical": [
+        "conditional"
+      ],
+      "secondary": [
+        "structural",
+        "traffic_structural"
+      ],
+      "tertiary": [
+        "tstr",
+        "trtr",
+        "tstr_trtr",
+        "anomaly"
+      ]
+    },
+    "traffic_metrics_source": "raw_flows",
+    "sampling_strategy": "stratified_per_class",
+    "is_conditional_model": true,
+    "num_classes": 2
+  }
+}

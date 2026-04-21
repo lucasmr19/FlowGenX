@@ -37,7 +37,7 @@ from src.reconstruction.base import (
     ReconstructionMeta,
     ReconstructionProfile,
 )
-from src.data_utils.preprocessing import ParsedPacket
+from src.preprocessing import ParsedPacket
 from src.reconstruction.heuristics import (
     assign_synthetic_ips,
     assign_synthetic_ports,

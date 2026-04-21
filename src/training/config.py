@@ -110,7 +110,7 @@ class TrainingConfig:
     checkpoint_metric: str  = "val_loss"
     checkpoint_mode:   str  = "min"       # "min" | "max"
     save_last:         bool = True
-    save_top_k:        int  = 1
+    save_top_k:        int  = 0
 
     # ------------------------------------------------------------------ #
     # Early stopping                                                      #

@@ -1,0 +1,55 @@
+data:
+  data_dir: data/pcap/
+  max_packets: 500
+  max_payload_bytes: 20
+  protocols: null
+experiment_name: transformer_flat_v1
+model:
+  cond_dim: 32
+  d_ff: 1024
+  d_model: 256
+  dropout: 0.1
+  max_seq_len: 512
+  model_type: transformer
+  n_heads: 8
+  n_layers: 6
+  name: transformer_flat_v1
+  num_classes: 2
+  pad_token_id: 0
+  temperature: 1.0
+  top_k: 50
+  top_p: 0.95
+  vocab_size: 10000
+representation:
+  max_length: 512
+  name: flat_tokenizer_v1
+  normalization: null
+  representation_type: flat_tokenizer
+training:
+  amp: false
+  batch_size: 32
+  checkpoint_dir: checkpoints/transformer_flat_v1
+  checkpoint_metric: val_loss
+  checkpoint_mode: min
+  early_stopping: true
+  early_stopping_delta: 0.0001
+  early_stopping_patience: 20
+  epochs: 20
+  grad_clip: 1.0
+  log_every: 50
+  lr: 0.0001
+  lr_min: 1.0e-06
+  lr_scheduler: cosine
+  num_workers: 0
+  save_last: true
+  save_top_k: 2
+  seed: 42
+  test_ratio: 0.15
+  train_ratio: 0.7
+  use_ema: false
+  use_tensorboard: false
+  use_wandb: false
+  val_every: 1
+  val_ratio: 0.15
+  warmup_epochs: 5
+  weight_decay: 1.0e-05

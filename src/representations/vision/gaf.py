@@ -23,7 +23,7 @@ import torch
 from torch import Tensor
 from skimage.transform import resize
 
-from src.data_utils.preprocessing import PacketWindow, ParsedPacket
+from ...preprocessing import TrafficChunk
 from ..base import TrafficRepresentation, RepresentationConfig, RepresentationType, Invertibility
 
 
@@ -42,7 +42,7 @@ class GAFConfig(RepresentationConfig):
 
 class GAFRepresentation(TrafficRepresentation):
     """
-    GAF representation that works directly over PacketWindow objects.
+    GAF representation that works directly over TrafficChunk objects.
     """
 
     def __init__(self, config: Optional[GAFConfig] = None) -> None:
@@ -69,9 +69,9 @@ class GAFRepresentation(TrafficRepresentation):
         self._is_fitted = True
         return self
 
-    def encode(self, window: PacketWindow) -> Tensor:
+    def encode(self, window: TrafficChunk) -> Tensor:
       """
-      Convert a PacketWindow into a GAF image.
+      Convert a TrafficChunk into a GAF image.
       Works robustly for real PCAP, avoiding constant matrices.
       """
       # 1. Extraer serie numérica desde los ParsedPacket
@@ -115,7 +115,7 @@ class GAFRepresentation(TrafficRepresentation):
         raise NotImplementedError("GAF is non-invertible.")
     
     def get_default_aggregator(self):
-        from ...data_utils.preprocessing import TrafficChunkAggregator
+        from ...preprocessing import TrafficChunkAggregator
         return TrafficChunkAggregator
 
     def project(self, x, **kwargs):

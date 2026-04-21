@@ -5,7 +5,7 @@ import numpy as np
 from scipy.stats import wasserstein_distance
 
 from src.evaluation.base import BaseEvaluator, EvaluationReport, EvaluationResult
-from src.data_utils.preprocessing import ParsedPacket
+from src.preprocessing import ParsedPacket
 
 
 FlowLike = Union[List[ParsedPacket], object]

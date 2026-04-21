@@ -5,7 +5,7 @@ lo que los hace ideales para testing rápido.
 
 import numpy as np
 from typing import List
-from ..data_utils.preprocessing import Flow, ParsedPacket
+from ..preprocessing import Flow, ParsedPacket
 
 
 def make_synthetic_flow(

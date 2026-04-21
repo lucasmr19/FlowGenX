@@ -3,7 +3,7 @@
 **FlowGenX** is a modular and extensible framework for network traffic analysis, modeling, and generative research. Its primary focus is **generative modeling of network flows**, while also supporting representation learning, synthetic data creation, domain reconstruction, and evaluation across multiple tasks. The framework is designed for experimentation, reproducibility, and benchmarking, with pluggable components that can be combined across different data representations and model families.
 
 <p align="center">
-  <img src="./media/pcap.png" alt="FlowGenX" width="300"/>
+  <img src="./media/pcap.png" alt="FlowGenX" width="600"/>
 </p>
 
 ---
@@ -69,7 +69,7 @@
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 data/
@@ -251,8 +251,8 @@ python -m pytest tests -v
 
 ## Experiments
 
-- Place experiment scripts in `src/experiments/`
-- Use `src/configs/` to store experiment and model configurations
+- Place experiment scripts in `experiments/`
+- Use `configs/` to store experiment and model configurations
 - Keep experiment definitions separated from model, representation, and evaluation code
 
 ---
@@ -281,4 +281,4 @@ python -m pytest tests -v
 
 ## License
 
-[GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE).
+This project is under the [GNU AFFERO GENERAL PUBLIC LICENSE](LICENSE).

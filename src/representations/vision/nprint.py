@@ -18,7 +18,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ...data_utils.preprocessing import PacketWindow, ParsedPacket
+from ...preprocessing import PacketWindow, ParsedPacket
 from ..base import (
     Invertibility,
     RepresentationConfig,
@@ -326,7 +326,7 @@ class NprintRepresentation(TrafficRepresentation):
         return packets
     
     def get_default_aggregator(self):
-        from ...data_utils.preprocessing import PacketWindowAggregator
+        from ...preprocessing import PacketWindowAggregator
         return PacketWindowAggregator
 
 

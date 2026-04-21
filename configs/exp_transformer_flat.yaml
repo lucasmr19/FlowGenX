@@ -46,7 +46,7 @@ model:
 
 # ---- Entrenamiento --------------------------------------------
 training:
-  epochs: 100
+  epochs: 20
   batch_size: 32
   lr: 1.0e-4
   weight_decay: 1.0e-5
@@ -89,6 +89,6 @@ training:
 # ---- Datos ----------------------------------------------------
 data:
   data_dir: data/pcap/
-  max_packets: null # null = todos los paquetes
+  max_packets: 500
   protocols: null # null = todos los protocolos
   max_payload_bytes: 20

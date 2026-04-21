@@ -185,7 +185,7 @@ def test_nprint_image():
 
 def test_datamodule():
     print("\n[TEST] TrafficDataModule (integración completa)")
-    from src.data_utils.loaders import TrafficDataModule
+    from src.datamodules import TrafficDataModule
     from src.representations.sequential.tokenizer import (
         FlatTokenizer, SequentialConfig
     )

@@ -265,6 +265,43 @@ class Trainer:
         """
         losses = self.model.train_step(batch)
         return losses
+    
+    def _disable_optimizer_updates(self) -> None:
+        """
+        Desactiva temporalmente optimizer.zero_grad() y optimizer.step().
+
+        Se usa en validación adversarial para permitir backward sin actualizar pesos.
+        """
+        if not isinstance(self._optimizer, dict):
+            return
+
+        self._opt_backup = {}
+
+        for name, opt in self._optimizer.items():
+            self._opt_backup[name] = {
+                "zero_grad": opt.zero_grad,
+                "step": opt.step,
+            }
+
+            # Reemplazar por no-ops
+            opt.zero_grad = lambda *args, **kwargs: None
+            opt.step      = lambda *args, **kwargs: None
+
+
+    def _restore_optimizer_updates(self) -> None:
+        """
+        Restaura los métodos originales de los optimizers tras validación.
+        """
+        if not hasattr(self, "_opt_backup"):
+            return
+
+        for name, opt in self._optimizer.items():
+            backup = self._opt_backup.get(name)
+            if backup:
+                opt.zero_grad = backup["zero_grad"]
+                opt.step      = backup["step"]
+
+        self._opt_backup = {}
 
     # ------------------------------------------------------------------
     # Época de validación
@@ -281,15 +318,27 @@ class Trainer:
         agg: Dict[str, float] = {}
         counts: Dict[str, int] = {}
 
-        with torch.no_grad():
-            for batch in loader:
-                losses = self.model.train_step(batch)
-                for k, v in losses.items():
-                    val = v.item() if isinstance(v, torch.Tensor) else float(v)
-                    agg[k]    = agg.get(k, 0.0) + val
-                    counts[k] = counts.get(k, 0) + 1
+        # ---- contexto según protocolo ----
+        if self._protocol == _PROTOCOL_ADVERSARIAL:
+            ctx = nullcontext()
+            self._disable_optimizer_updates()
+        else:
+            ctx = torch.no_grad()
 
-        # Calcular promedios y prefijar con "val_"
+        try:
+            with ctx:
+                for batch in loader:
+                    losses = self.model.train_step(batch)
+
+                    for k, v in losses.items():
+                        val = v.item() if isinstance(v, torch.Tensor) else float(v)
+                        agg[k]    = agg.get(k, 0.0) + val
+                        counts[k] = counts.get(k, 0) + 1
+        finally:
+            if self._protocol == _PROTOCOL_ADVERSARIAL:
+                self._restore_optimizer_updates()
+
+        # ---- promedios ----
         result: Dict[str, float] = {}
         for k, total in agg.items():
             result[f"val_{k}"] = total / max(counts[k], 1)

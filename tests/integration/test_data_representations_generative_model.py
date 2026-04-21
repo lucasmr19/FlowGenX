@@ -24,7 +24,7 @@ from src.representations.vision import (
     NprintImageRepresentation, NprintImageConfig
 )
 
-from src.data_utils.preprocessing import PCAPPipeline, PacketWindowAggregator
+from src.preprocessing import PCAPPipeline, PacketWindowAggregator
 
 PCAP_PATH = Path("data/pcap/Benign/Gmail.pcap")
 
